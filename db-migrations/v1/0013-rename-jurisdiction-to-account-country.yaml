@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0013-rename-jurisdiction-to-account-country
+      author: tax-return-ai
+      changes:
+        - renameColumn:
+            tableName: financial_records
+            oldColumnName: jurisdiction
+            newColumnName: account_country
+            columnDataType: varchar
+        - renameColumn:
+            tableName: staged_financial_records
+            oldColumnName: jurisdiction
+            newColumnName: account_country
+            columnDataType: varchar
+        - renameColumn:
+            tableName: ingested_source_documents
+            oldColumnName: jurisdiction
+            newColumnName: account_country
+            columnDataType: varchar

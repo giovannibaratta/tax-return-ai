@@ -1,0 +1,33 @@
+# TODO: Can we consolidate before release ? without destroying the existing DB (temporary migration scripts are accepted, but not as part of this migration files)
+databaseChangeLog:
+  - include:
+      file: db-migrations/v1/0001-create-tax-document-metadata.yaml
+  - include:
+      file: db-migrations/v1/0002-create-financial-records.yaml
+  - include:
+      file: db-migrations/v1/0003-add-parent-chunk.yaml
+  - include:
+      file: db-migrations/v1/0004-create-taxpayer-profile.yaml
+  - include:
+      file: db-migrations/v1/0005-create-asset-tax-classification.yaml
+  - include:
+      file: db-migrations/v1/0006-create-remittance-events.yaml
+  - include:
+      file: db-migrations/v1/0007-create-staged-financial-records.yaml
+  - include:
+      file: db-migrations/v1/0008-add-openfigi-detected.yaml
+  - include:
+      file: db-migrations/v1/0009-create-ingested-source-documents.yaml
+  - include:
+      file: db-migrations/v1/0010-create-asset-mergers.yaml
+  - include:
+      file: db-migrations/v1/0011-add-marginal-tax-rate.yaml
+  - include:
+      file: db-migrations/v1/0012-add-approved-financial-record-id.yaml
+  - include:
+      file: db-migrations/v1/0013-rename-jurisdiction-to-account-country.yaml
+  - include:
+      file: db-migrations/v1/0014-add-source-type-and-confidence.yaml
+  - include:
+      file: db-migrations/v1/0015-create-tax-income-records.yaml
+

@@ -1,0 +1,64 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0009-create-ingested-source-documents
+      # TODO: Wrong author
+      author: antigravity
+      changes:
+        - createTable:
+            tableName: ingested_source_documents
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: file_sha
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: file_name
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: provider
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: jurisdiction
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: transaction_count
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: error_message
+                  type: TEXT
+                  constraints:
+                    nullable: true
+              - column:
+                  name: processed_at
+                  type: DATETIME
+                  constraints:
+                    nullable: false
+        - createIndex:
+            indexName: idx_ingested_docs_sha
+            tableName: ingested_source_documents
+            columns:
+              - column:
+                  name: file_sha

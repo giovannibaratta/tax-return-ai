@@ -1,0 +1,12 @@
+Conto : A0000 TEST USER;;;;;;;;;;;
+Data estrazione : 26-7-2026 16:30:21;;;;;;;;;;;
+;;;;;;;;;;;
+Cedole e Dividendi ordinati per Data Operazione;;;;;;;;;;;
+Dal : 01-01-2025;;;;;;;;;;;
+al : 31-12-2025;;;;;;;;;;;
+;;;;;;;;;;;
+Il file include i primi 3000 movimenti;;;;;;;;;;;
+;;;;;;;;;;;
+Data operazione;Data valuta;Tipo operazione;Ticker;Isin;Protocollo;Descrizione;Quantità;Importo euro;Importo Divisa;Divisa;Riferimento ordine
+16-05-2025;21-05-2025;Incasso dividendi italia;REY;IT0005282865;22106690;REPLY;0;5,75;0;EUR;              
+16-05-2025;21-05-2025;Ritenuta dividendi italia;REY;IT0005282865;22106691;REPLY;0;-1,5;0;EUR;              

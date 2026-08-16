@@ -1,0 +1,102 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0002-create-financial-records
+      author: giovannibaratta
+      changes:
+        - createTable:
+            tableName: financial_records
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: provider
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source_file_name
+                  type: VARCHAR(255)
+              - column:
+                  name: source_file_sha
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: event_timestamp
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: ingestion_timestamp
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: asset_type
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: symbol
+                  type: VARCHAR(50)
+              - column:
+                  name: action
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: quantity
+                  type: DECIMAL
+              - column:
+                  name: unit_price
+                  type: DECIMAL
+              - column:
+                  name: currency
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fees
+                  type: DECIMAL
+              - column:
+                  name: total_amount
+                  type: DECIMAL
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fx_rate
+                  type: DECIMAL
+              - column:
+                  name: local_total_amount
+                  type: DECIMAL
+              - column:
+                  name: tax_year
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+              - column:
+                  name: jurisdiction
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: additional_metadata
+                  type: TEXT
+              - column:
+                  name: verification_status
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consensus_log
+                  type: TEXT
+              - column:
+                  name: isin
+                  type: VARCHAR(12)
+              - column:
+                  name: asset_name
+                  type: VARCHAR(255)

@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0014-add-source-type-and-confidence
+      author: giovannibaratta
+      changes:
+        - addColumn:
+            tableName: tax_document_metadata
+            columns:
+              - column:
+                  name: source_type
+                  type: VARCHAR(20)
+                  # TODO: Drop the default value
+                  defaultValue: "regulation"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: confidence_level
+                  type: VARCHAR(10)
+                  # TODO: Drop the default value
+                  defaultValue: "high"
+                  constraints:
+                    nullable: false

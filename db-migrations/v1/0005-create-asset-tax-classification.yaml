@@ -1,0 +1,45 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0005-create-asset-tax-classification
+      author: giovannibaratta
+      changes:
+        - createTable:
+            tableName: ireland_asset_tax_classification
+            columns:
+              - column:
+                  name: isin
+                  type: VARCHAR(12)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: asset_name
+                  type: VARCHAR(255)
+              - column:
+                  name: tax_regime
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: domicile_country
+                  type: VARCHAR(10)
+              - column:
+                  name: is_ucits
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: classification_source
+                  type: VARCHAR(50)
+              - column:
+                  name: notes
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP

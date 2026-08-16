@@ -1,0 +1,42 @@
+# System Files
+.DS_Store
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database files (sqlite-vec storage)
+*.db
+*.sqlite
+*.sqlite3
+/database/*.db
+/database/*.sqlite
+
+# Local temporary/scratch files
+.ipynb_checkpoints/
+/Users/gio/.gemini/
+/logs/
+
+
+*.egg-info/
+*.egg/
+.vscode
+.pii_cache/
+database/tax_data.db.bak
+.env
+data/processed
+.cache
+database/tax_data.db.202607191525
+tmp_scripts
+.sessions/
+.sessions/*.json
+TODO
+pyrightconfig.json
+ai_plans

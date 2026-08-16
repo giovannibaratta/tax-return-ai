@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0008-add-openfigi-detected
+      author: giovannibaratta
+      changes:
+        - addColumn:
+            tableName: staged_financial_records
+            columns:
+              - column:
+                  name: openfigi_detected
+                  type: VARCHAR(50)
+        # TODO: Do we need an openfigi_detected for the final financial records?
+        - addColumn:
+            tableName: financial_records
+            columns:
+              - column:
+                  name: openfigi_detected
+                  type: VARCHAR(50)

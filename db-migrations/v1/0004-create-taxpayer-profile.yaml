@@ -1,0 +1,39 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0004-create-taxpayer-profile
+      author: giovannibaratta
+      changes:
+        - createTable:
+            tableName: taxpayer_profile
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: tax_year
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: fiscal_residence_country
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: domicile_country
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: residency_type
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: notes
+                  type: TEXT

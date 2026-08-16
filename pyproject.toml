@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tax-return-ai"
+version = "0.1.0"
+description = "Cross-border tax return AI assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*", "src*"]
+
+
+[tool.basedpyright]
+# Other configurations...
+venvPath = "."
+venv = ".venv"
+reportUnannotatedClassAttribute = "none"
+reportDeprecated = "error"
+reportMissingTypeStubs = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "C90", # mccabe cyclomatic complexity
+    "UP",  # pyupgrade
+    "PLR", # Pylint refactor (complexity, max statements, max branches)
+]
+ignore = [
+    "PLR0913", # Too many arguments in function definition (handled by Pydantic models when appropriate)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-statements = 50
+max-branches = 12
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

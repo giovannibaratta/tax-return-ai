@@ -1,0 +1,57 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0010-create-asset-mergers
+      author: giovannibaratta
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                tableName: asset_mergers
+      changes:
+        - createTable:
+            tableName: asset_mergers
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: old_isin
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: new_isin
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: old_symbol
+                  type: VARCHAR(50)
+              - column:
+                  name: new_symbol
+                  type: VARCHAR(50)
+              - column:
+                  name: effective_date
+                  type: DATETIME
+                  constraints:
+                    nullable: false
+              - column:
+                  name: exchange_ratio
+                  type: NUMERIC
+                  constraints:
+                    nullable: false
+              - column:
+                  name: old_nav
+                  type: NUMERIC
+              - column:
+                  name: new_nav
+                  type: NUMERIC
+              - column:
+                  name: created_at
+                  type: DATETIME
+                  constraints:
+                    nullable: false

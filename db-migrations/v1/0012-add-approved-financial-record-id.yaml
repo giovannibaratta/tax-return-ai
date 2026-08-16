@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0012-add-approved-financial-record-id
+      author: giovannibaratta
+      changes:
+        - addColumn:
+            tableName: staged_financial_records
+            columns:
+              - column:
+                  name: approved_financial_record_id
+                  type: BIGINT

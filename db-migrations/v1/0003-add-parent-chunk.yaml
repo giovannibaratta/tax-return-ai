@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0003-add-parent-chunk-columns
+      author: antigravity
+      changes:
+        - addColumn:
+            tableName: tax_document_metadata
+            columns:
+              - column:
+                  name: parent_chunk_id
+                  type: INTEGER
+                  constraints:
+                    nullable: true
+              - column:
+                  name: parent_text_content
+                  type: TEXT
+                  constraints:
+                    nullable: true

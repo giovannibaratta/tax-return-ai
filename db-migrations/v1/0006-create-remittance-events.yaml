@@ -1,0 +1,39 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0006-create-remittance-events
+      author: giovannibaratta
+      changes:
+        - createTable:
+            tableName: remittance_events
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: financial_record_id
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_remittance_financial_record
+                    references: financial_records(id)
+              - column:
+                  name: remittance_date
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: amount_eur
+                  type: DECIMAL
+                  constraints:
+                    nullable: false
+              - column:
+                  name: notes
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP

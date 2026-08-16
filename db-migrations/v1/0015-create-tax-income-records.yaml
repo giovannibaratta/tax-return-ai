@@ -1,0 +1,53 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0015-create-tax-income-records
+      author: antigravity
+      changes:
+        - createTable:
+            tableName: tax_income_records
+            columns:
+              - column:
+                  name: id
+                  type: integer
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: tax_year
+                  type: integer
+                  constraints:
+                    nullable: false
+              - column:
+                  name: jurisdiction
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: income_type
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source_document_sha
+                  type: varchar(64)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: payload_json
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+        - createIndex:
+            indexName: idx_tax_income_records_year_jurisdiction
+            tableName: tax_income_records
+            columns:
+              - column:
+                  name: tax_year
+              - column:
+                  name: jurisdiction

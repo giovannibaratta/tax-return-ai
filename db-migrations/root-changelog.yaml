@@ -1,0 +1,3 @@
+databaseChangeLog:
+  - include:
+      file: db-migrations/v1/root-v1.yaml

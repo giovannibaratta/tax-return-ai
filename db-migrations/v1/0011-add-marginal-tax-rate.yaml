@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 0011-add-marginal-tax-rate
+      author: giovannibaratta
+      changes:
+        - addColumn:
+            tableName: taxpayer_profile
+            columns:
+              - column:
+                  name: marginal_tax_rate
+                  type: DECIMAL(5,4)
