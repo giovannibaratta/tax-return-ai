@@ -267,7 +267,7 @@ def _process_fifo_chunk(
     return lot_matches
 
 
-def _partition_lots(buy_lots: list[TradeRecord], sell_d: date) -> tuple[list[TradeRecord], list[TradeRecord]]:
+def _partition_lots(buy_lots: list[TradeRecord], sell_date: datetime) -> tuple[list[TradeRecord], list[TradeRecord]]:
     """Partition buy lots into Section 581(1) preceding 28-day lots and older FIFO lots.
 
     Statutory Basis:
@@ -278,9 +278,13 @@ def _partition_lots(buy_lots: list[TradeRecord], sell_d: date) -> tuple[list[Tra
     preceding_lots: list[TradeRecord] = []
     older_lots: list[TradeRecord] = []
 
+    # sell_d is retained to compute the exact calendar day delta required by Section 581's 28-day window rule,
+    # as the statutory window relies on calendar dates rather than an exact 672-hour sliding window.
+    sell_d = sell_date.date()
+
     for lot in buy_lots:
-        lot_d = lot.event_timestamp.date()
-        if lot_d <= sell_d:
+        if lot.event_timestamp <= sell_date:
+            lot_d = lot.event_timestamp.date()
             days_diff = (sell_d - lot_d).days
             if days_diff <= _SECTION_581_WINDOW_DAYS:
                 preceding_lots.append(lot)
@@ -333,7 +337,7 @@ def match_lots_fifo(
         raise ValueError(f"Buy lot ID {buy_lots[0].id} has missing ISIN.")
 
     stepped_up_prices = stepped_up_unit_prices or {}
-    preceding_lots, older_lots = _partition_lots(buy_lots, sell_date.date())
+    preceding_lots, older_lots = _partition_lots(buy_lots, sell_date)
 
     remaining_sell_qty = sell_quantity
     lot_matches: list[LotMatch] = []
