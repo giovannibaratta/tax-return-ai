@@ -38,8 +38,8 @@ To maintain high readability, maintainability, and explainability across the rep
 - **Standard Format**: Use `,` (comma) strictly for the decimal/cents part and NOTHING or `.` (dot) for thousands ("migliaia").
 - **Parsing Rule**:
   - `1.091` or `1.091,00` represents integer `1091` (one thousand ninety-one).
-  (TODO): Isn't 1091.50 what we don't want ?
-  - `1091,50` or `1.091,50` represents `1091.50`.
+  - `1091,50` or `1.091,50` represents decimal `1091.50`.
+  - Dot (`.`) in Italian documents is NEVER a decimal separator; comma (`,`) is the ONLY decimal separator.
   - In OCR extractors, parsers, and LLM voter prompts, strip thousands separators (`.`) and convert comma (`,`) to Python/JSON standard decimal dot (`.`).
 
 ## 6. Defensive Financial & Critical Computation Post-Conditions
