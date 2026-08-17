@@ -489,6 +489,7 @@ class IrishEmploymentDetailSummaryPayload(BaseModel):
     """Payload representing an Irish Revenue Employment Detail Summary (EDS / P60)."""
 
     income_type: Literal["irish_employment_detail_summary"] = "irish_employment_detail_summary"
+    tax_year: int
     employer_name: str
     employer_registration_number: str | None = None
     employment_id: str | None = None

@@ -3,7 +3,7 @@
 Each agent is a standalone ``pydantic_ai.Agent`` instance with:
 - Its own system prompt defining the legal role
 - ``CourtDeps`` as the shared dependency container (DB + embedding runner)
-- Tools registered via ``@<agent>.tool`` in ``court_tools.py``
+- Tools registered via ``register_tax_tools`` in ``backend.tools.tax_tools``
 
 """
 
@@ -13,24 +13,13 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from backend.db_manager import DatabaseManager
 from backend.deliberation.models import CourtVerdict
-from backend.llm.embedding_runner import BaseEmbeddingRunner
+from backend.utils.agents import SharedAgentDeps
 
 
 @dataclass
-class CourtDeps:
-    """Shared dependency container injected into every agent turn via RunContext.
-
-    Attributes:
-        db: Initialized DatabaseManager connected to the SQLite vector database.
-        embedding_runner: BGE-M3 embedding runner for semantic evidence search.
-        jurisdiction: Active jurisdiction filter for evidence retrieval (e.g. 'italy').
-    """
-
-    db: DatabaseManager
-    embedding_runner: BaseEmbeddingRunner
-    jurisdiction: str
+class CourtDeps(SharedAgentDeps):
+    """Shared dependency container injected into every agent turn via RunContext."""
 
 
 # --- Agent declarations ---
@@ -66,9 +55,6 @@ class CourtDeps:
 # specific instructions as dynamic messages—could yield better cache hit rates.
 # Revisit this trade-off when profiling real-world token usage via _log_usage().
 
-# TODO: Is search_evidence just a renaming for doing semantic search in the regulations ? I believe we are using two different
-# names in two different places.
-
 PLAINTIFF_SYSTEM_PROMPT = (
     "You are the Plaintiff Counsel (Tax Filing Strategist) representing the taxpayer "
     "in a tax compliance courtroom.\n"
@@ -81,13 +67,13 @@ PLAINTIFF_SYSTEM_PROMPT = (
     "in Italy) or favorable local reliefs wherever applicable to minimize the taxpayer's "
     "final liability.\n"
     "3. **Cite Evidence & Records:** Ground all claims in the provided RAG source manuals and tax "
-    "rules. Use `search_evidence` to retrieve regulatory context, `get_financial_record` to fetch "
+    "rules. Use `query_tax_knowledge` to retrieve regulatory context, `get_financial_record` to fetch "
     "specific transactions by ID, and `filter_financial_records` to query transactions by asset type, "
     "ISIN, quantity thresholds, or purchase dates. Cite specific documents, pages, and records.\n"
     "4. **Format Arguments:** Present a clear, structured argument outlining: gross values, "
     "claimed deductions/credits, final rates, and tax liability, supporting each step with "
     "clear mathematical calculations.\n"
-    "5. **Rich Search Queries:** When using `search_evidence`, formulate detailed, rich multi-word descriptive queries instead of single words.\n"
+    "5. **Rich Search Queries:** When using `query_tax_knowledge`, formulate detailed, rich multi-word descriptive queries instead of single words.\n"
     "6. **Source Provenance & Confidence:** Evidence chunks include `source_type` ('regulation' "
     "or 'research') and `confidence_level` ('high', 'medium', 'low').\n"
     "   - REGULATION sources are official tax authority publications — treat as authoritative.\n"
@@ -109,12 +95,12 @@ DEFENSE_SYSTEM_PROMPT = (
     "1. **Identify Omissions & Errors:** Look for undeclared income, misclassified assets, "
     "or arithmetic errors in their filing strategy.\n"
     "2. **Enforce Strict Compliance:** Flag aggressive or misapplied tax codes.\n"
-    "3. **Cite Counter-Evidence & Records:** Use `search_evidence` to query the RAG source "
+    "3. **Cite Counter-Evidence & Records:** Use `query_tax_knowledge` to query the RAG source "
     "manuals and `filter_financial_records` / `get_financial_record` to audit underlying financial transactions. "
     "Counter the Plaintiff's claims with specific citations (document name, page number, record ID).\n"
     "4. **Burden of Proof:** Propose the correct, audited tax calculation based on legal "
     "guidelines.\n"
-    "5. **Rich Search Queries:** When using `search_evidence`, formulate detailed, rich multi-word descriptive queries instead of single words.\n"
+    "5. **Rich Search Queries:** When using `query_tax_knowledge`, formulate detailed, rich multi-word descriptive queries instead of single words.\n"
     "6. **Source Provenance Enforcement:** Scrutinize claims grounded in RESEARCH (AI-generated) "
     "sources. These are less reliable than official REGULATION sources and may contain "
     "hallucinations. If the Plaintiff cites AI-generated research without corroborating it "
@@ -131,7 +117,7 @@ JUDGE_SYSTEM_PROMPT = (
     "Guidelines:\n"
     "1. **Evaluate Arguments:** Weigh the Plaintiff's optimization claims against the "
     "Defense's audit objections.\n"
-    "2. **Verify Evidence, Records & Math:** Use `search_evidence` to verify conflicting "
+    "2. **Verify Evidence, Records & Math:** Use `query_tax_knowledge` to verify conflicting "
     "interpretations and `filter_financial_records` / `get_financial_record` to inspect financial transactions. "
     "Use the `calculate` tool for ALL numeric computations — never rely on your own mental arithmetic.\n"
     "3. **Draft the Verdict:** Write a clear, comprehensive ruling deciding which "

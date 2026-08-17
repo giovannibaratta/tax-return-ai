@@ -1,4 +1,4 @@
-"""Unit tests for financial record ID lookup and filtering tools in DatabaseManager, tax_tools, and court_tools."""
+"""Unit tests for financial record ID lookup and filtering tools in DatabaseManager and tax_tools."""
 
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -9,10 +9,6 @@ from backend.db_manager import DatabaseManager, MemoryDb
 from backend.db_models import FinancialRecord
 from backend.domain_models import BaseStrictRecord, TradeRecord
 from backend.llm.embedding_runner import BaseEmbeddingRunner
-from backend.services.tax_services import (
-    filter_financial_records_action,
-    get_financial_record_action,
-)
 from tests.utils import insert_financial_record
 
 

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json as json_lib
 import unittest
 from datetime import datetime
-from typing import Any
+from decimal import Decimal
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 from backend.consensus_models import TransactionExtractionItem
@@ -11,17 +14,25 @@ from backend.ingestion.pii.pii_pipeline import PIIPipeline
 from backend.ingestion.pii.session import PIISession
 from backend.llm.runner import BaseLLMRunner
 
-# TODO: The construstor accept the param. Why do we have to patch it ?
-# Disable caching by default for unit tests of the pipeline passes
-original_init = PIIPipelineConfig.__init__
 
-
-def patched_init(self, *args, **kwargs):
-    kwargs.setdefault("pii_cache_enabled", False)
-    original_init(self, *args, **kwargs)
-
-
-PIIPipelineConfig.__init__ = patched_init
+def _make_config(
+    *,
+    presidio_enabled: bool = False,
+    openai_filter_enabled: bool = False,
+    openai_filter_model_path: str = "openai/privacy-filter",
+    llm_redaction: Literal[False] | LLMRedactionConfig = False,
+    pii_cache_enabled: bool = False,
+    pii_cache_dir: str = ".pii_cache",
+) -> PIIPipelineConfig:
+    """Helper to instantiate PIIPipelineConfig with caching disabled by default in tests."""
+    return PIIPipelineConfig(
+        presidio_enabled=presidio_enabled,
+        openai_filter_enabled=openai_filter_enabled,
+        openai_filter_model_path=openai_filter_model_path,
+        llm_redaction=llm_redaction,
+        pii_cache_enabled=pii_cache_enabled,
+        pii_cache_dir=pii_cache_dir,
+    )
 
 
 class TestPresidioPIIPass(unittest.TestCase):
@@ -29,7 +40,7 @@ class TestPresidioPIIPass(unittest.TestCase):
 
     def setUp(self) -> None:
         self.pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
         )
 
     def test_fiscal_code_regex_recognizer(self) -> None:
@@ -75,7 +86,7 @@ class TestPresidioPIIPass(unittest.TestCase):
     def test_all_disabled_raises_value_error(self) -> None:
         """Initializing PIIPipeline with all passes disabled must raise ValueError."""
         with self.assertRaises(ValueError):
-            PIIPipeline(PIIPipelineConfig(presidio_enabled=False, openai_filter_enabled=False, llm_redaction=False))
+            PIIPipeline(_make_config(presidio_enabled=False, openai_filter_enabled=False, llm_redaction=False))
 
     def test_all_caps_italian_name_anonymized(self) -> None:
         """All-caps Italian names must be correctly anonymized using title-cased analysis pass."""
@@ -101,13 +112,37 @@ class TestPresidioPIIPass(unittest.TestCase):
         self.assertEqual(masked, text)
         self.assertEqual(len(session.placeholder_map), 0)
 
+    def test_account_number_anonymized(self) -> None:
+        """Presidio must anonymize account numbers matching custom recognizers."""
+        pipeline = PIIPipeline(
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+        )
+        text = "Order executed under Conto FE765 for account U***12123."
+        masked, session = pipeline.anonymize_text(text)
+
+        self.assertIn("[ANONYMIZED_PRESIDIO_ACCOUNT_NUMBER_1]", masked)
+        self.assertIn("[ANONYMIZED_PRESIDIO_ACCOUNT_NUMBER_2]", masked)
+        self.assertNotIn("FE765", masked)
+        self.assertNotIn("U***12123", masked)
+
+    def test_date_time_not_anonymized_as_location(self) -> None:
+        """Dates and timestamps must not be falsely anonymized as LOCATION/PERSON."""
+        pipeline = PIIPipeline(
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+        )
+        text = "Executed del 4.07.2024 at 16:35:55, valuta 08.07.2024."
+        masked, session = pipeline.anonymize_text(text)
+
+        self.assertEqual(masked, text)
+        self.assertEqual(len(session.placeholder_map), 0)
+
 
 class TestOpenAIPrivacyFilterPass(unittest.TestCase):
     """Tests for Pass 2 — OpenAI Privacy Filter local model."""
 
-    def _make_pipeline(self, mock_detections: list) -> PIIPipeline:
+    def _make_pipeline(self, mock_detections: list[dict[str, object]]) -> PIIPipeline:
         """Create a PIIPipeline with a mocked HF token-classification pipeline."""
-        pii = PIIPipeline(PIIPipelineConfig(presidio_enabled=False, openai_filter_enabled=True, llm_redaction=False))
+        pii = PIIPipeline(_make_config(presidio_enabled=False, openai_filter_enabled=True, llm_redaction=False))
 
         mock_hf_pipeline = MagicMock(return_value=mock_detections)
         pii._privacy_filter_pipeline = mock_hf_pipeline
@@ -118,7 +153,7 @@ class TestOpenAIPrivacyFilterPass(unittest.TestCase):
         text = "Signed by: Giovanni SonoVero, broker: Directa."
         start = text.index("Giovanni SonoVero")
         end = start + len("Giovanni SonoVero")
-        detections = [
+        detections: list[dict[str, object]] = [
             {"entity_group": "private_person", "start": start, "end": end, "score": 0.99},
         ]
         pipeline = self._make_pipeline(detections)
@@ -130,8 +165,8 @@ class TestOpenAIPrivacyFilterPass(unittest.TestCase):
 
     def test_second_pass_labels_uppercased(self) -> None:
         """Entity label from model (e.g. 'private_address') must be uppercased in placeholder."""
-        detections = [
-            {"entity_group": "private_address", "start": 3, "end": 20, "score": 0.97},
+        detections: list[dict[str, object]] = [
+            {"entity_group": "private_address", "start": 3, "end": 28, "score": 0.97},
         ]
         text = "at VIA SEGRETA ITALIANA 10, Milan."
         pipeline = self._make_pipeline(detections)
@@ -139,11 +174,11 @@ class TestOpenAIPrivacyFilterPass(unittest.TestCase):
 
         keys = list(session.placeholder_map.keys())
         self.assertTrue(any("PRIVATE_ADDRESS" in k for k in keys))
-        # TODO: We are not asserting that the text doesn't include the redacted information
+        self.assertNotIn("VIA SEGRETA ITALIANA 10", masked)
 
     def test_second_pass_preserves_non_pii_text(self) -> None:
         """Text segments not flagged by the model must remain untouched."""
-        detections = [
+        detections: list[dict[str, object]] = [
             {"entity_group": "private_person", "start": 0, "end": 12, "score": 0.99},
         ]
         text = "Alice Smith bought AAPL shares."
@@ -154,14 +189,14 @@ class TestOpenAIPrivacyFilterPass(unittest.TestCase):
 
     def test_second_pass_disabled_skips_model(self) -> None:
         """When openai_filter_enabled=False, the HF pipeline must never be loaded or called."""
-        pii = PIIPipeline(PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False))
+        pii = PIIPipeline(_make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False))
         with patch.object(pii, "_load_privacy_filter") as mock_load:
             pii.anonymize_text("Alice Smith at 123 Main St.")
             mock_load.assert_not_called()
 
     def test_inference_failure_raises_exception(self) -> None:
         """A crash in HF inference must raise a RuntimeError rather than leaking raw PII."""
-        pii = PIIPipeline(PIIPipelineConfig(presidio_enabled=False, openai_filter_enabled=True, llm_redaction=False))
+        pii = PIIPipeline(_make_config(presidio_enabled=False, openai_filter_enabled=True, llm_redaction=False))
         pii._privacy_filter_pipeline = MagicMock(side_effect=RuntimeError("GPU OOM"))
 
         text = "CF: ROSMRI87A04H501K"
@@ -174,7 +209,7 @@ class TestDeanonymization(unittest.TestCase):
 
     def setUp(self) -> None:
         self.pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
         )
         self.session = PIISession()
         # Manually seed the mapping so tests don't depend on NER recall
@@ -182,20 +217,23 @@ class TestDeanonymization(unittest.TestCase):
         self.session.placeholder_map["[ANONYMIZED_OPENAI_PRIVATE_PERSON_1]"] = "Alice Smith"
         self.session.counter = {"PRESIDIO_PERSON": 1, "OPENAI_PRIVATE_PERSON": 1}
 
-    # TODO: Can any be dropped ?
-    def _make_item(self, **kwargs: Any) -> TransactionExtractionItem:
-        event_date = kwargs.pop("event_date", datetime(2025, 6, 15, 15, 45, 0))
-        asset_type = kwargs.pop("asset_type", AssetType.STOCK)
-        symbol = kwargs.pop("symbol", "AAPL")
-        action = kwargs.pop("action", TransactionAction.BUY)
-        total_amount = kwargs.pop("total_amount", 1500.0)
+    def _make_item(
+        self,
+        *,
+        event_date: datetime = datetime(2025, 6, 15, 15, 45, 0),
+        asset_type: AssetType = AssetType.STOCK,
+        symbol: str | None = "AAPL",
+        action: TransactionAction = TransactionAction.BUY,
+        total_amount: Decimal | float = Decimal("1500.0"),
+        provider: str | None = None,
+    ) -> TransactionExtractionItem:
         return TransactionExtractionItem(
             event_date=event_date,
             asset_type=asset_type,
             symbol=symbol,
             action=action,
-            total_amount=total_amount,
-            **kwargs,
+            total_amount=Decimal(str(total_amount)) if not isinstance(total_amount, Decimal) else total_amount,
+            provider=provider,
         )
 
     def test_presidio_placeholder_restored(self) -> None:
@@ -217,7 +255,7 @@ class TestDeanonymization(unittest.TestCase):
     def test_deanonymize_works_even_when_anonymizer_disabled(self) -> None:
         """deanonymize_item must still restore values if mapping exists, even if passes are disabled."""
         pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
         )
         item = self._make_item(provider="[ANONYMIZED_PRESIDIO_PERSON_1]")
         restored = pipeline.deanonymize_item(item, self.session)
@@ -240,7 +278,7 @@ class TestSessionManagement(unittest.TestCase):
     def test_separate_sessions_prevent_bleed(self) -> None:
         """Placeholder allocated in doc 1 must not appear in doc 2 using a separate session."""
         pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
         )
 
         masked1, session1 = pipeline.anonymize_text("CF: ROSMRI87A04H501K.")
@@ -258,25 +296,28 @@ class TestPIIValidation(unittest.TestCase):
 
     def setUp(self) -> None:
         self.pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
+            _make_config(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
         )
         self.session = PIISession()
         self.session.placeholder_map["[ANONYMIZED_PRESIDIO_PERSON_1]"] = "Alice"
 
-    # TODO: Drop Any if possible.
-    def _make_item(self, **kwargs: Any) -> TransactionExtractionItem:
-        event_date = kwargs.pop("event_date", datetime(2025, 6, 15, 15, 45, 0))
-        asset_type = kwargs.pop("asset_type", AssetType.STOCK)
-        symbol = kwargs.pop("symbol", "AAPL")
-        action = kwargs.pop("action", TransactionAction.BUY)
-        total_amount = kwargs.pop("total_amount", 1500.0)
+    def _make_item(
+        self,
+        *,
+        event_date: datetime = datetime(2025, 6, 15, 15, 45, 0),
+        asset_type: AssetType = AssetType.STOCK,
+        symbol: str | None = "AAPL",
+        action: TransactionAction = TransactionAction.BUY,
+        total_amount: Decimal | float = Decimal("1500.0"),
+        provider: str | None = None,
+    ) -> TransactionExtractionItem:
         return TransactionExtractionItem(
             event_date=event_date,
             asset_type=asset_type,
             symbol=symbol,
             action=action,
-            total_amount=total_amount,
-            **kwargs,
+            total_amount=Decimal(str(total_amount)) if not isinstance(total_amount, Decimal) else total_amount,
+            provider=provider,
         )
 
     def test_raise_on_failure_value(self) -> None:
@@ -318,7 +359,7 @@ class TestLLMRedactionPass(unittest.TestCase):
         )
 
         pipeline = PIIPipeline(
-            config=PIIPipelineConfig(
+            config=_make_config(
                 presidio_enabled=False,
                 openai_filter_enabled=False,
                 llm_redaction=LLMRedactionConfig(runner=mock_runner),
@@ -345,7 +386,7 @@ class TestLLMRedactionPass(unittest.TestCase):
         )
 
         pipeline = PIIPipeline(
-            config=PIIPipelineConfig(
+            config=_make_config(
                 presidio_enabled=False,
                 openai_filter_enabled=False,
                 llm_redaction=LLMRedactionConfig(runner=mock_runner),
@@ -360,7 +401,7 @@ class TestLLMRedactionPass(unittest.TestCase):
         mock_runner.complete.side_effect = RuntimeError("Connection timeout")
 
         pipeline = PIIPipeline(
-            config=PIIPipelineConfig(
+            config=_make_config(
                 presidio_enabled=False,
                 openai_filter_enabled=False,
                 llm_redaction=LLMRedactionConfig(runner=mock_runner),
@@ -368,29 +409,3 @@ class TestLLMRedactionPass(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError):
             pipeline.anonymize_text("some text")
-
-    # TODO: Why this test is here and not in the predisio block.
-    def test_account_number_anonymized(self) -> None:
-        """Presidio must anonymize account numbers matching custom recognizers."""
-        pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
-        )
-        text = "Order executed under Conto FE765 for account U***12123."
-        masked, session = pipeline.anonymize_text(text)
-
-        self.assertIn("[ANONYMIZED_PRESIDIO_ACCOUNT_NUMBER_1]", masked)
-        self.assertIn("[ANONYMIZED_PRESIDIO_ACCOUNT_NUMBER_2]", masked)
-        self.assertNotIn("FE765", masked)
-        self.assertNotIn("U***12123", masked)
-
-    # TODO: Why this test is here and not in the predisio block.
-    def test_date_time_not_anonymized_as_location(self) -> None:
-        """Dates and timestamps must not be falsely anonymized as LOCATION/PERSON."""
-        pipeline = PIIPipeline(
-            PIIPipelineConfig(presidio_enabled=True, openai_filter_enabled=False, llm_redaction=False)
-        )
-        text = "Executed del 4.07.2024 at 16:35:55, valuta 08.07.2024."
-        masked, session = pipeline.anonymize_text(text)
-
-        self.assertEqual(masked, text)
-        self.assertEqual(len(session.placeholder_map), 0)

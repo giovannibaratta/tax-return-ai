@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
@@ -15,6 +16,13 @@ from backend.ingestion.generic_voter import (
     default_reconciler,
     run_multi_voter_consensus,
 )
+from backend.ingestion.income_pipeline import (
+    IncomeIngestionPipeline,
+    IngestionEscalated,
+    IngestionSuccess,
+)
+from backend.ingestion.parser import BasePDFParser, ParsedPage
+from backend.ingestion.pii.pii_pipeline import PIIPipeline, PIIPipelineConfig
 from backend.llm.pydantic_ai_runner import PydanticAIRunner
 from backend.services.tax_services import get_tax_income_records_action
 from tests.utils import DummyMockPydanticRunner
@@ -29,6 +37,7 @@ def test_db() -> DatabaseManager:
 def test_generic_voter_consensus_identical() -> None:
     # Given: 3 runners returning identical model payload
     payload = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Acme Corp",
         gross_pay_eur=Decimal("60000.00"),
         income_tax_paid_eur=Decimal("15000.00"),
@@ -60,6 +69,7 @@ def test_generic_voter_consensus_identical() -> None:
 def test_generic_voter_consensus_majority() -> None:
     # Given: 2/3 majority agreement on gross_pay
     p1 = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Acme Corp",
         gross_pay_eur=Decimal("60000.00"),
         income_tax_paid_eur=Decimal("15000.00"),
@@ -94,6 +104,7 @@ def test_generic_voter_consensus_majority() -> None:
 async def test_get_tax_income_records_tool(test_db: DatabaseManager) -> None:
     # Given: Persisted tax income record in database
     payload = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Meta Platforms Ireland",
         gross_pay_eur=Decimal("110000.00"),
         income_tax_paid_eur=Decimal("35000.00"),
@@ -151,6 +162,7 @@ def test_default_reconciler_income_summary_exact_match() -> None:
     dt_start = datetime(2025, 1, 1, tzinfo=timezone.utc)
     dt_end = datetime(2025, 12, 31, tzinfo=timezone.utc)
     eds1 = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Stripe Technology Europe",
         employer_registration_number="9876543A",
         employment_id="1",
@@ -180,6 +192,7 @@ def test_default_reconciler_income_summary_exact_match() -> None:
 def test_default_reconciler_income_summary_majority_fields() -> None:
     # Given: 3 EDS outputs where voter 3 differs on PRSI weeks and tax paid
     eds1 = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Apple Distribution International",
         employer_registration_number="1234567T",
         gross_pay_eur=Decimal("95000.00"),
@@ -211,6 +224,7 @@ def test_default_reconciler_income_summary_majority_fields() -> None:
 def test_default_reconciler_income_summary_irreconcilable_mismatch() -> None:
     # Given: 3 voters returning 3 distinct gross pay amounts (no majority)
     base = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="TikTok Technology Ltd",
         gross_pay_eur=Decimal("80000.00"),
         income_tax_paid_eur=Decimal("20000.00"),
@@ -239,6 +253,7 @@ def test_default_reconciler_edge_cases() -> None:
 
     # Given: Single output
     single = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Single Employer",
         gross_pay_eur=Decimal("50000.00"),
         income_tax_paid_eur=Decimal("10000.00"),
@@ -248,3 +263,60 @@ def test_default_reconciler_edge_cases() -> None:
     r_single, disc_single = default_reconciler([single])
     assert r_single == single
     assert len(disc_single) == 0
+
+
+def test_income_ingestion_pipeline_success_and_escalated(test_db: DatabaseManager, tmp_path: Path) -> None:
+    # Given: Dummy PDF file and mock parser
+    dummy_pdf = tmp_path / "eds_sample.pdf"
+    dummy_pdf.write_text("dummy pdf binary content", encoding="utf-8")
+
+    class MockParser(BasePDFParser):
+        @classmethod
+        def parse_pdf(cls, file_path: str, force_parsing: bool = False, **kwargs: object) -> list[ParsedPage]:
+            return [ParsedPage(page_number=1, combined_content="Employment Detail Summary 2025 Acme Corp")]
+
+    # 1. Test IngestionSuccess
+    payload_agree = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
+        employer_name="Acme Corp",
+        gross_pay_eur=Decimal("60000.00"),
+        income_tax_paid_eur=Decimal("15000.00"),
+        usc_paid_eur=Decimal("2400.00"),
+        prsi_paid_eur=Decimal("2400.00"),
+    )
+    cfg = PIIPipelineConfig(presidio_enabled=True, llm_redaction=False, pii_cache_enabled=False)
+    pipeline_success = IncomeIngestionPipeline(
+        db=test_db,
+        pii_pipeline=PIIPipeline(config=cfg),
+        ocr_parser=MockParser,
+        runners=[DummyMockPydanticRunner(payload_agree)],
+    )
+
+    # When: ingesting with unanimous voters
+    res_success = pipeline_success.ingest_irish_eds(str(dummy_pdf))
+
+    # Then: returns IngestionSuccess with persisted record
+    assert isinstance(res_success, IngestionSuccess)
+    assert res_success.status == "approved"
+    assert res_success.record.tax_year == 2025
+    assert res_success.record.payload.employer_name == "Acme Corp"
+
+    # 2. Test IngestionEscalated
+    p1 = payload_agree.model_copy(update={"gross_pay_eur": Decimal("60000.00")})
+    p2 = payload_agree.model_copy(update={"gross_pay_eur": Decimal("65000.00")})
+    p3 = payload_agree.model_copy(update={"gross_pay_eur": Decimal("70000.00")})
+
+    pipeline_escalated = IncomeIngestionPipeline(
+        db=test_db,
+        pii_pipeline=PIIPipeline(config=cfg),
+        ocr_parser=MockParser,
+        runners=[DummyMockPydanticRunner(p1), DummyMockPydanticRunner(p2), DummyMockPydanticRunner(p3)],
+    )
+
+    # When: ingesting with irreconcilable split voters
+    res_escalated = pipeline_escalated.ingest_irish_eds(str(dummy_pdf))
+
+    # Then: returns IngestionEscalated without persisting record
+    assert isinstance(res_escalated, IngestionEscalated)
+    assert res_escalated.status == "escalated"
+    assert len(res_escalated.consensus_result.discrepancies) > 0

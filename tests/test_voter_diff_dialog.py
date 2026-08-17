@@ -1,8 +1,8 @@
-from tests.utils import insert_financial_record
 """Tests for VoterDiffMergeDialog and Candidate Record Retention."""
 
 from datetime import datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -13,6 +13,7 @@ from backend.db_manager import DatabaseManager, MemoryDb
 from backend.db_models import FinancialRecord
 from backend.domain_models import AssetType, TransactionAction
 from src.ui.voter_diff_dialog import VoterDiffMergeDialog
+from tests.utils import insert_financial_record
 
 
 @pytest.fixture(scope="session")
@@ -32,7 +33,7 @@ def test_db():
     db.close()
 
 
-def test_voter_diff_dialog_populates_and_approves(qapp, test_db: DatabaseManager):
+def test_voter_diff_dialog_populates_and_approves(qapp: QApplication, test_db: DatabaseManager) -> None:
     # Given: A financial record with consensus log containing candidate voter extractions
     v1_item = TransactionExtractionItem(
         event_date=datetime(2025, 1, 1, 10, 0),
@@ -44,7 +45,6 @@ def test_voter_diff_dialog_populates_and_approves(qapp, test_db: DatabaseManager
         total_amount=Decimal("1500.0"),
         currency="USD",
         fx_rate=Decimal("1.0"),
-        local_total_amount=Decimal("1500.0"),
         fees=Decimal("0.0"),
     )
     v2_item = TransactionExtractionItem(
@@ -57,7 +57,6 @@ def test_voter_diff_dialog_populates_and_approves(qapp, test_db: DatabaseManager
         total_amount=Decimal("1800.0"),
         currency="USD",
         fx_rate=Decimal("1.0"),
-        local_total_amount=Decimal("1800.0"),
         fees=Decimal("0.0"),
     )
     c_log = ConsensusLog(
@@ -90,15 +89,15 @@ def test_voter_diff_dialog_populates_and_approves(qapp, test_db: DatabaseManager
     inserted = insert_financial_record(test_db, rec)
 
     # When: Opening VoterDiffMergeDialog and approving merged record
-    from unittest.mock import patch
-
     dialog = VoterDiffMergeDialog(inserted, db=test_db)
     assert dialog.table.rowCount() == 12
 
     # Click Apply V2 for quantity row
     dialog._apply_voter_all(2)
-    with patch("src.ui.voter_diff_dialog.QMessageBox.information"), \
-         patch("src.ui.voter_diff_dialog.QMessageBox.critical") as mock_crit:
+    with (
+        patch("src.ui.voter_diff_dialog.QMessageBox.information"),
+        patch("src.ui.voter_diff_dialog.QMessageBox.critical") as mock_crit,
+    ):
         dialog._approve_merged_record()
         if mock_crit.called:
             raise RuntimeError(f"QMessageBox.critical called: {mock_crit.call_args}")

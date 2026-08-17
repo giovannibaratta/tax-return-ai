@@ -185,6 +185,7 @@ def test_discriminated_strict_record_from_raw():
 def test_tax_income_records_db_persistence(db_manager: DatabaseManager) -> None:
     # Given: A validated Irish EDS payload and domain model
     payload = IrishEmploymentDetailSummaryPayload(
+        tax_year=2025,
         employer_name="Google Ireland Ltd",
         employer_registration_number="1234567T",
         employment_id="1",

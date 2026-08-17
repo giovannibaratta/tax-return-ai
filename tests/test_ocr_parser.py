@@ -316,7 +316,7 @@ def test_chandra_api_processing_location(tmp_path: Path) -> None:
     )
 
     with (
-        patch.dict("os.environ", {"DATALAB_API_KEY": "test_key", "CHANDRA_PROCESSING_LOCATION": "eu"}),
+        patch.dict("os.environ", {"DATALAB_API_KEY": "test_key", "DATALAB_PROCESSING_LOCATION": "eu"}),
         patch.object(ChandraAPIParser, "_submit_api_job", return_value=mock_resp) as mock_submit,
         patch.object(ChandraAPIParser, "_poll_api_job", return_value="Parsed Markdown Content"),
     ):

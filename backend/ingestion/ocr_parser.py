@@ -10,7 +10,6 @@ redundant model inference or API calls.
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
@@ -127,8 +126,10 @@ def _pdf_page_to_image(page: fitz.Page, dpi: int) -> Image.Image:
     """
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
-    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-    return Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+    pixmap = page.get_pixmap(matrix=matrix, alpha=False)  # pyright: ignore[reportUnknownMemberType]
+    width: int = int(pixmap.width)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+    height: int = int(pixmap.height)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+    return Image.frombytes("RGB", (width, height), pixmap.samples)
 
 
 def _get_ocr_cache_path(file_path: str, parser_tag: str, cache_dir: str = ".cache/ocr") -> str:
@@ -150,17 +151,7 @@ def _get_ocr_cache_path(file_path: str, parser_tag: str, cache_dir: str = ".cach
 
     file_sha = calculate_sha256(file_path)
     os.makedirs(cache_dir, exist_ok=True)
-    exact_path = os.path.join(cache_dir, f"{file_sha}_{parser_tag}.json")
-    if os.path.exists(exact_path):
-        return exact_path
-
-    # TODO: If the parser_tag is specified, we should not look for other cache files.
-    # This may indicate an issue with the way the cache is being used.
-    matches = glob.glob(os.path.join(cache_dir, f"{file_sha}_chandra*.json"))
-    if matches:
-        return sorted(matches)[0]
-
-    return exact_path
+    return os.path.join(cache_dir, f"{file_sha}_{parser_tag}.json")
 
 
 def _load_cached_pages(cache_path: str) -> list[ParsedPage] | None:
@@ -321,7 +312,7 @@ class ChandraOCRParser(BasePDFParser):
         print(f"ChandraOCRParser (Local): opening '{file_path}' (DPI: {dpi}) ...")
 
         with fitz.open(file_path) as doc:
-            total_pages = doc.page_count
+            total_pages: int = int(doc.page_count)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
             print(f"  Total pages: {total_pages}")
 
             for page_idx in range(total_pages):
@@ -336,7 +327,7 @@ class ChandraOCRParser(BasePDFParser):
                 print(f"    Page {page_num} rasterised in {raster_time_ms:.1f}ms")
 
                 batch = [BatchInputItem(image=pil_image, prompt_type=_PROMPT_TYPE)]
-                result = manager.generate(batch, include_headers_footers=False)[0]
+                result = manager.generate(batch, include_headers_footers=False)[0]  # pyright: ignore[reportUnknownMemberType]
 
                 clean_markdown = result.markdown or ""
 
@@ -364,14 +355,72 @@ class ChandraOCRParser(BasePDFParser):
         return parsed_pages
 
 
-class ChandraAPIParser(BasePDFParser):
-    """PDF parser using the Datalab (Chandra) Cloud API.
+def _get_processing_location(processing_location: str | None = None) -> str | None:
+    """Resolve Datalab processing location from argument or DATALAB_PROCESSING_LOCATION env var."""
+    loc = (
+        processing_location
+        or os.environ.get("DATALAB_PROCESSING_LOCATION")
+    )
+    return loc.strip().lower() if loc else None
 
-    API Key is loaded strictly from ``DATALAB_API_KEY`` environment variable.
-    Results are cached locally to disk before chunking to prevent redundant API calls.
+
+class ChandraAPIParser(BasePDFParser):
+    """PDF parser implementation calling the remote Datalab (Chandra) OCR API.
+
+    Requires DATALAB_API_KEY environment variable to be set.
     """
 
-    API_URL: str = DATALAB_API_URL
+    API_URL = "https://www.datalab.to/api/v1"
+
+    @classmethod
+    def _request_presigned_upload(
+        cls, file_path: str, headers: dict[str, str], location: str
+    ) -> str:
+        """Upload PDF directly using Datalab regional presigned URL and return file reference."""
+        filename = os.path.basename(file_path)
+        upload_req_payload = {
+            "filename": filename,
+            "content_type": "application/pdf",
+            "processing_location": location,
+        }
+        res_upload = requests.post(
+            f"{cls.API_URL}/files/upload",
+            json=upload_req_payload,
+            headers=headers,
+            timeout=30,
+        )
+        if not res_upload.ok:
+            raise Exception(f"Datalab upload URL request failed ({res_upload.status_code}): {res_upload.text}")
+
+        upload_info = res_upload.json()
+        upload_url = upload_info.get("upload_url")
+        file_id = upload_info.get("file_id")
+        reference = upload_info.get("reference")
+
+        if not upload_url or not file_id or not reference:
+            raise Exception(f"Invalid upload URL response from Datalab: {upload_info}")
+
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        res_put = requests.put(
+            upload_url,
+            data=pdf_bytes,
+            headers={"Content-Type": "application/pdf"},
+            timeout=60,
+        )
+        if not res_put.ok:
+            raise Exception(f"Datalab direct upload PUT failed ({res_put.status_code}): {res_put.text}")
+
+        res_confirm = requests.get(
+            f"{cls.API_URL}/files/{file_id}/confirm",
+            headers=headers,
+            timeout=30,
+        )
+        if not res_confirm.ok:
+            raise Exception(f"Datalab upload confirmation failed ({res_confirm.status_code}): {res_confirm.text}")
+
+        return reference
 
     @classmethod
     def _submit_api_job(
@@ -389,13 +438,7 @@ class ChandraAPIParser(BasePDFParser):
             Validated DatalabConvertResponse model.
         """
         filename = os.path.basename(file_path)
-        # TODO: Why do we need two variables. One should suffice. Use the datalab processing location.
-        # Also the caller alraedy has this logic. It is just duplication.
-        loc = (
-            processing_location
-            or os.environ.get("DATALAB_PROCESSING_LOCATION")
-            or os.environ.get("CHANDRA_PROCESSING_LOCATION")
-        )
+        loc = _get_processing_location(processing_location)
 
         data = {
             "output_format": "markdown",
@@ -405,56 +448,8 @@ class ChandraAPIParser(BasePDFParser):
         }
 
         if loc:
-            # TODO: This could be encapsulated in a private helper
-            loc_clean = loc.strip().lower()
-            data["processing_location"] = loc_clean
-
-            # Step 1: Request presigned direct upload URL for regional processing
-            upload_req_payload = {
-                "filename": filename,
-                "content_type": "application/pdf",
-                "processing_location": loc_clean,
-            }
-            res_upload = requests.post(
-                f"{cls.API_URL}/files/upload",
-                json=upload_req_payload,
-                headers=headers,
-                timeout=30,
-            )
-            if not res_upload.ok:
-                raise Exception(f"Datalab upload URL request failed ({res_upload.status_code}): {res_upload.text}")
-
-            upload_info = res_upload.json()
-            upload_url = upload_info.get("upload_url")
-            file_id = upload_info.get("file_id")
-            reference = upload_info.get("reference")
-
-            if not upload_url or not file_id or not reference:
-                raise Exception(f"Invalid upload URL response from Datalab: {upload_info}")
-
-            # Step 2: Direct PUT to presigned upload URL
-            with open(file_path, "rb") as f:
-                pdf_bytes = f.read()
-
-            res_put = requests.put(
-                upload_url,
-                data=pdf_bytes,
-                headers={"Content-Type": "application/pdf"},
-                timeout=60,
-            )
-            if not res_put.ok:
-                raise Exception(f"Datalab direct upload PUT failed ({res_put.status_code}): {res_put.text}")
-
-            # Step 3: Confirm upload
-            res_confirm = requests.get(
-                f"{cls.API_URL}/files/{file_id}/confirm",
-                headers=headers,
-                timeout=30,
-            )
-            if not res_confirm.ok:
-                raise Exception(f"Datalab upload confirmation failed ({res_confirm.status_code}): {res_confirm.text}")
-
-            # Step 4: Submit convert job with reference
+            data["processing_location"] = loc
+            reference = cls._request_presigned_upload(file_path, headers, loc)
             data["file_url"] = reference
             response = requests.post(
                 f"{cls.API_URL}/convert",
@@ -588,12 +583,7 @@ class ChandraAPIParser(BasePDFParser):
             raise ValueError("Datalab API key missing. Set DATALAB_API_KEY environment variable.")
 
         headers = {"X-Api-Key": api_key}
-        # TODO: Why do we need two variables. One should suffice. Use the datalab processing location
-        loc = (
-            processing_location
-            or os.environ.get("DATALAB_PROCESSING_LOCATION")
-            or os.environ.get("CHANDRA_PROCESSING_LOCATION")
-        )
+        loc = _get_processing_location(processing_location)
 
         print(
             f"ChandraAPIParser: submitting '{file_path}' to Datalab API ({mode} mode, location: {loc or 'default'}) ..."

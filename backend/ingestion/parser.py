@@ -141,18 +141,3 @@ class PDFDocumentParser(BasePDFParser):
 
         print(f"Finished parsing. Extracted {len(parsed_pages)} pages.")
         return parsed_pages
-
-
-def get_parser_registry() -> dict[str, type[BasePDFParser]]:
-    """Return dictionary mapping parser names to parser classes.
-
-    TODO: if we have circular import, maybe we are structuring the code poorly?
-    Lazy imports Chandra parser classes to prevent circular imports.
-    """
-    from backend.ingestion.ocr_parser import ChandraAPIParser, ChandraOCRParser
-
-    return {
-        "pdfplumber": PDFDocumentParser,
-        "chandra": ChandraOCRParser,
-        "chandra_api": ChandraAPIParser,
-    }

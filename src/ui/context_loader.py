@@ -1,4 +1,4 @@
-"""Utilities for listing and reading document files from the data directory."""
+"""Utilities for reading document files and formatting prompt context for UI chat."""
 
 from __future__ import annotations
 
@@ -23,14 +23,10 @@ def load_context_doc(file_path: str | Path, base_dir: str | Path | None = None) 
     path = Path(file_path).resolve()
     base = Path(base_dir).resolve() if base_dir else get_app_config().data_dir.resolve()
 
-    # TODO: What is that ? It looks very messy. Should also this be part of the backend ? Isn't this better suited in the UI package ?
     try:
         rel_path = str(path.relative_to(base))
     except ValueError:
-        try:
-            rel_path = str(path.relative_to(base.parent))
-        except ValueError:
-            rel_path = path.name
+        rel_path = path.name
 
     content = ""
     if path.exists() and path.is_file():

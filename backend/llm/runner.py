@@ -22,11 +22,17 @@ class BaseLLMRunner(ABC):
         Any other backslash followed by a character is invalid in JSON and causes JSONDecodeError.
         This replaces invalid single backslashes with double backslashes \\.
         """
-        # TODO: Document bfnrt
+        # RFC 8259 JSON specification permits exactly 8 single-character escape sequences:
+        # \" (quotation mark), \\ (reverse solidus), \/ (solidus), \b (backspace),
+        # \f (formfeed), \n (linefeed), \r (carriage return), \t (horizontal tab),
+        # as well as \uXXXX (4-hex-digit unicode codepoints).
         valid_escape_pattern = r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})'
 
         def replace_invalid(match: re.Match[str]) -> str:
-            # TODO: Can you explain what are we doing here (or bette rwhy)
+            # LLMs frequently output raw backslashes (e.g. in regex patterns like \d,
+            # file paths like C:\temp, or LaTeX symbols) that are invalid in JSON string literals.
+            # If the backslash escape is valid JSON, keep it unchanged. Otherwise, prefix
+            # with an extra backslash to escape it into a valid JSON string literal ("\\").
             text = match.group(0)
             if re.match(valid_escape_pattern, text):
                 return text

@@ -1,25 +1,26 @@
 """Tests for TaxpayerProfileTab and AssetClassificationTab UI components."""
 
 from decimal import Decimal
+
 import pytest
 from PySide6.QtWidgets import QApplication
 from sqlmodel import SQLModel
 
 from backend.db_manager import DatabaseManager, MemoryDb
-from src.ui.config import UIConfig
 from src.jurisdiction.ireland.cgt_models import (
     AssetTaxClassification,
     AssetTaxClassificationDomain,
     IrishTaxRegime,
     ResidencyType,
     TaxpayerProfile,
+    infer_residency_type,
+    parse_irish_tax_regime,
 )
 from src.ui.classification_tab import (
-    CATEGORY_DIRECT_EQUITY,
     CATEGORY_ETC,
-    CATEGORY_UCITS_ETF,
     AssetClassificationTab,
 )
+from src.ui.config import UIConfig
 from src.ui.profile_tab import TaxpayerProfileTab
 
 
@@ -191,8 +192,6 @@ def test_asset_classification_tab_regime_inference_and_override(qapp: QApplicati
 
 
 def test_infer_residency_type_logic(qapp: QApplication, test_db: DatabaseManager) -> None:
-    from src.jurisdiction.ireland.cgt_models import infer_residency_type
-
     # IE residence + IE domicile -> RESIDENT_DOMICILED
     assert infer_residency_type("IE", "IE") == ResidencyType.RESIDENT_DOMICILED
 
@@ -210,8 +209,6 @@ def test_infer_residency_type_logic(qapp: QApplication, test_db: DatabaseManager
 
 
 def test_parse_irish_tax_regime_case_and_name_support() -> None:
-    from src.jurisdiction.ireland.cgt_models import parse_irish_tax_regime
-
     assert parse_irish_tax_regime("exit_tax") == IrishTaxRegime.EXIT_TAX
     assert parse_irish_tax_regime("EXIT_TAX") == IrishTaxRegime.EXIT_TAX
     assert parse_irish_tax_regime("cgt_standard") == IrishTaxRegime.CGT_STANDARD
@@ -241,5 +238,3 @@ def test_db_loading_with_uppercase_regime_name(qapp: QApplication, test_db: Data
     assert len(tab._classifications) == 1
     assert tab._classifications[0].tax_regime == IrishTaxRegime.EXIT_TAX
     assert tab._classifications[0].domicile_country == "IE"
-
-

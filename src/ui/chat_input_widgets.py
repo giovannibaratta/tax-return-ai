@@ -17,6 +17,10 @@ from PySide6.QtWidgets import (
 
 from backend.chat.models import AttachedContextDoc
 
+# Regular expression matching inline context reference tokens in the format @[filename.pdf].
+# Used to enable atomic deletion (treating the entire token as a single unit on backspace/delete).
+CONTEXT_TAG_PATTERN: re.Pattern[str] = re.compile(r"@\[[^\]]*\]\s?")
+
 
 class ContextTextEdit(QTextEdit):
     """QTextEdit with inline '@' trigger detection and atomic placeholder deletion.
@@ -35,11 +39,16 @@ class ContextTextEdit(QTextEdit):
         """
         key = event.key()
 
-        # TODO: Are we checking that @ is not intercepted when in a middle of a word ?
         if key == Qt.Key.Key_At or event.text() == "@":
-            cursor_rect = self.cursorRect()
-            global_pos = self.viewport().mapToGlobal(cursor_rect.bottomLeft())
-            self.at_triggered.emit(global_pos)
+            cursor = self.textCursor()
+            pos = cursor.position()
+            text = self.toPlainText()
+            # Only trigger popup at start of text or when preceded by whitespace (avoids emails)
+            is_word_boundary = pos == 0 or (pos <= len(text) and text[pos - 1].isspace())
+            if is_word_boundary:
+                cursor_rect = self.cursorRect()
+                global_pos = self.viewport().mapToGlobal(cursor_rect.bottomLeft())
+                self.at_triggered.emit(global_pos)
             super().keyPressEvent(event)
             return
 
@@ -48,9 +57,7 @@ class ContextTextEdit(QTextEdit):
             if not cursor.hasSelection():
                 pos = cursor.position()
                 text = self.toPlainText()
-                # TODO: move to a constant and explain why and what we are doing
-                pattern = re.compile(r"@\[[^\]]*\]\s?")
-                for match in pattern.finditer(text):
+                for match in CONTEXT_TAG_PATTERN.finditer(text):
                     start, end = match.span()
                     if key == Qt.Key.Key_Backspace and start < pos <= end:
                         cursor.setPosition(start)

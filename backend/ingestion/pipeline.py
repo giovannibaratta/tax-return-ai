@@ -22,7 +22,7 @@ from backend.db_models import (
 from backend.domain_models import IngestionStatus
 from backend.ingestion.helpers import IngestionDocument, sanitize_filename
 from backend.ingestion.openfigi import OpenFIGIMapper
-from backend.ingestion.parser import get_parser_registry
+from backend.ingestion.parser_registry import get_parser_registry
 from backend.ingestion.pii.pii_pipeline import PIIPipeline
 from backend.ingestion.pii.session import PIISession
 from backend.llm.runner import BaseLLMRunner

@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from backend.ingestion.nav_resolver import NAVResolver
+from backend.ingestion.openfigi import FIGIMappingResult
 
 
 def test_nav_resolver_calculations():
@@ -48,8 +49,6 @@ def test_nav_resolver_calculations():
 
 
 def test_nav_resolver_missing_ticker_raises_value_error() -> None:
-    from backend.ingestion.openfigi import FIGIMappingResult
-
     resolver = NAVResolver()
     resolver.figi_mapper.map_isin = lambda isin: FIGIMappingResult(ticker=None, name=None)
 

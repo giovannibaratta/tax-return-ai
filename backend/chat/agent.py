@@ -201,7 +201,6 @@ def build_chat_history_prompt(
 DepsT = TypeVar("DepsT", bound=SharedAgentDeps)
 
 
-# TODO: Why can't we extract the deps from the agent. I don't like to have to pass the agent and the deps around.
 def run_chat_turn_sync(  # noqa: PLR0917
     agent: Agent[DepsT, str],
     deps: DepsT,

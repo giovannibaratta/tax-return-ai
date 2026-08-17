@@ -17,7 +17,8 @@ from backend.ingestion.helpers import (
 )
 from backend.ingestion.language_detector import detect_file_language
 from backend.ingestion.markdown_parser import MarkdownParser
-from backend.ingestion.parser import BasePDFParser, ParsedPage, get_parser_registry
+from backend.ingestion.parser import BasePDFParser, ParsedPage
+from backend.ingestion.parser_registry import get_parser_registry
 
 _ = load_dotenv()
 

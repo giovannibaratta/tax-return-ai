@@ -29,7 +29,7 @@ from backend.ingestion.helpers import (
     extract_account_country_and_provider,
     log_env_vars,
 )
-from backend.ingestion.parser import get_parser_registry
+from backend.ingestion.parser_registry import get_parser_registry
 from backend.ingestion.pii.models import LLMRedactionConfig, PIIPipelineConfig
 from backend.ingestion.pii.pii_pipeline import PIIPipeline
 from backend.ingestion.pipeline import TransactionPipeline, VerificationStatus

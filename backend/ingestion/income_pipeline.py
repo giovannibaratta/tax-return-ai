@@ -12,6 +12,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Annotated, Generic, Literal, TypeVar
+
+from pydantic import BaseModel, Field
 
 from backend.db_manager import DatabaseManager
 from backend.domain_models import (
@@ -27,11 +30,45 @@ from backend.llm.pydantic_ai_runner import PydanticAIRunner
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T", bound=BaseModel)
+
+
+class IngestionSuccess(BaseModel, Generic[T]):
+    """Successful income document ingestion with persisted record and approved consensus."""
+
+    status: Literal["approved"] = "approved"
+    record: StrictTaxIncomeRecord
+    consensus_result: GenericConsensusResult[T]
+
+
+class IngestionEscalated(BaseModel, Generic[T]):
+    """Escalated income document ingestion requiring manual review due to voter discrepancies."""
+
+    status: Literal["escalated"] = "escalated"
+    consensus_result: GenericConsensusResult[T]
+
+
+class IngestionFailed(BaseModel, Generic[T]):
+    """Failed income document ingestion due to unrecoverable extraction or voter failure."""
+
+    status: Literal["failed"] = "failed"
+    error_message: str
+    consensus_result: GenericConsensusResult[T] | None = None
+
+
+IrishEDSIngestionResult = Annotated[
+    IngestionSuccess[IrishEmploymentDetailSummaryPayload]
+    | IngestionEscalated[IrishEmploymentDetailSummaryPayload]
+    | IngestionFailed[IrishEmploymentDetailSummaryPayload],
+    Field(discriminator="status"),
+]
+
 IRISH_EDS_SYSTEM_PROMPT = """You are an expert Irish tax accounting extraction engine.
 Your task is to extract official employment income details from an Irish Revenue "Employment Detail Summary" (EDS / P60 replacement) document into a single JSON object.
 
 Extract the following fields strictly into the JSON schema:
 - income_type: "irish_employment_detail_summary"
+- tax_year: Tax year integer (e.g. 2024, 2025)
 - employer_name: Full registered name of employer
 - employer_registration_number: Employer tax registration number / ERN (or null)
 - employment_id: Employment sequence number/ID (or null)
@@ -86,22 +123,20 @@ class IncomeIngestionPipeline:
     def ingest_irish_eds(
         self,
         file_path: str,
-        # TODO: can tax year be derived from the document ?
-        tax_year: int,
         force_ocr: bool = False,
         force_pii: bool = False,
-        # TODO: This could be modeled using a discriminated union of payloads per document type
-    ) -> tuple[StrictTaxIncomeRecord | None, GenericConsensusResult[IrishEmploymentDetailSummaryPayload]]:
+    ) -> IrishEDSIngestionResult:
         """Ingest and verify an Irish Revenue Employment Detail Summary (EDS) PDF.
+
+        Tax year and employment fields are derived directly from the document text.
 
         Args:
             file_path: Absolute or relative path to PDF document.
-            tax_year: Tax year of the employment summary.
             force_ocr: Bypass local OCR disk cache if True.
             force_pii: Bypass PII cache if True.
 
         Returns:
-            Tuple of (persisted StrictTaxIncomeRecord or None if escalated, consensus result).
+            Discriminated union: IngestionSuccess, IngestionEscalated, or IngestionFailed.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Income document not found: {file_path}")
@@ -124,8 +159,8 @@ class IncomeIngestionPipeline:
 
         # 3. Multi-Voter Consensus Extraction
         extraction_prompt = (
-            f"Please extract all Employment Detail Summary (EDS) fields from the following "
-            f"official Revenue document text for Irish tax year {tax_year}:\n\n"
+            "Please extract all Employment Detail Summary (EDS) fields from the following "
+            f"official Revenue document text:\n\n"
             f"```text\n{masked_text}\n```"
         )
 
@@ -137,13 +172,16 @@ class IncomeIngestionPipeline:
             runners=self.runners,
         )
 
-        if consensus_result.status != "approved" or consensus_result.reconciled_output is None:
-            logger.warning(
-                "EDS consensus was not approved (status=%s): %s",
-                consensus_result.status,
-                consensus_result.discrepancies,
+        if consensus_result.status == "escalated":
+            logger.warning("EDS consensus escalated: %s", consensus_result.discrepancies)
+            return IngestionEscalated(consensus_result=consensus_result)
+
+        if consensus_result.status == "failed" or consensus_result.reconciled_output is None:
+            logger.warning("EDS consensus failed: %s", consensus_result.discrepancies)
+            return IngestionFailed(
+                error_message=f"Consensus failed: {consensus_result.discrepancies}",
+                consensus_result=consensus_result,
             )
-            return None, consensus_result
 
         # 4. De-anonymization
         reconciled_payload = self.pii_pipeline.deanonymize_item(
@@ -153,7 +191,7 @@ class IncomeIngestionPipeline:
 
         # 5. Persist to Database
         strict_record = StrictTaxIncomeRecord(
-            tax_year=tax_year,
+            tax_year=reconciled_payload.tax_year,
             jurisdiction="ireland",
             income_type=reconciled_payload.income_type,
             source_document_sha=doc_sha,
@@ -166,8 +204,11 @@ class IncomeIngestionPipeline:
         logger.info(
             "Successfully persisted tax income record #%d for year %d (%s).",
             record_id,
-            tax_year,
+            reconciled_payload.tax_year,
             reconciled_payload.employer_name,
         )
 
-        return persisted_record, consensus_result
+        return IngestionSuccess(
+            record=persisted_record,
+            consensus_result=consensus_result,
+        )

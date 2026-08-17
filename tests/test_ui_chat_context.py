@@ -1,30 +1,34 @@
 """Tests for Chat UI context document reference feature (@ trigger, +context button, character threshold warning, and verbatim prompt assembly)."""
 
+from __future__ import annotations
+
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
-from backend.chat.context_loader import format_prompt_with_context, load_context_doc
 from backend.chat.models import AssistantChatMessage
 from backend.db_manager import DatabaseManager, LocalDb
 from backend.utils.agents import ToolCallInfo
 from src.ui.chat_tab import ChatTab
 from src.ui.context_file_selector import ContextFileSelectorWidget
+from src.ui.context_loader import format_prompt_with_context, load_context_doc
 
 
 @pytest.fixture(scope="session")
-def qapp():
+def qapp() -> QApplication:
     """Ensure single QApplication instance exists for GUI tests."""
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
-    return app
+    return app  # type: ignore[return-value]
 
 
 @pytest.fixture
-def temp_data_dir(tmp_path):
+def temp_data_dir(tmp_path: Path) -> Path:
     """Create temporary data folder hierarchy with sample documents."""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -39,8 +43,9 @@ def temp_data_dir(tmp_path):
     doc2.write_text("A" * 2500, encoding="utf-8")
     return data_dir
 
+
 @pytest.fixture
-def db_instance(tmp_path):
+def db_instance(tmp_path: Path) -> Generator[DatabaseManager, None, None]:
     """Provide isolated DatabaseManager fixture."""
     db_path = str(tmp_path / "test_chat_context.db")
     db = DatabaseManager(db_config=LocalDb(db_path=db_path, vector_db_path=str(Path(db_path).parent / "vector.db")))
@@ -48,7 +53,7 @@ def db_instance(tmp_path):
     db.close()
 
 
-def test_context_loader_load_and_format(temp_data_dir: Path):
+def test_context_loader_load_and_format(temp_data_dir: Path) -> None:
     # Given: A document in temporary data folder
     doc_path = temp_data_dir / "scenarios" / "tax_scenario_2024.json"
 
@@ -63,7 +68,7 @@ def test_context_loader_load_and_format(temp_data_dir: Path):
     assert '{"year": 2024, "tax_due": 1500}' in prompt
 
 
-def test_context_file_selector_tree_and_filter(temp_data_dir: Path, qapp):
+def test_context_file_selector_tree_and_filter(temp_data_dir: Path, qapp: QApplication) -> None:
     # Given: ContextFileSelectorWidget initialized with temporary data folder
     selector = ContextFileSelectorWidget(data_dir=temp_data_dir)
 
@@ -78,7 +83,7 @@ def test_context_file_selector_tree_and_filter(temp_data_dir: Path, qapp):
     selector.close()
 
 
-def test_chat_tab_inline_at_trigger_and_deletion(temp_data_dir: Path, db_instance: DatabaseManager, qapp):
+def test_chat_tab_inline_at_trigger_and_deletion(temp_data_dir: Path, db_instance: DatabaseManager, qapp: QApplication) -> None:
     # Given: ChatTab instance and dummy data document
     chat_tab = ChatTab(db=db_instance)
     doc_path = str(temp_data_dir / "scenarios" / "tax_scenario_2024.json")
@@ -97,7 +102,7 @@ def test_chat_tab_inline_at_trigger_and_deletion(temp_data_dir: Path, db_instanc
     assert "scenarios/tax_scenario_2024.json" not in chat_tab._inline_attached_docs
 
 
-def test_chat_tab_bottom_context_and_char_warning(temp_data_dir: Path, db_instance: DatabaseManager, qapp):
+def test_chat_tab_bottom_context_and_char_warning(temp_data_dir: Path, db_instance: DatabaseManager, qapp: QApplication) -> None:
     # Given: ChatTab and a large document (>2,000 chars)
     chat_tab = ChatTab(db=db_instance)
     chat_tab.show()
@@ -120,10 +125,7 @@ def test_chat_tab_bottom_context_and_char_warning(temp_data_dir: Path, db_instan
     assert chat_tab._warning_label.isHidden()
 
 
-def test_atomic_tag_deletion_and_chip_close(temp_data_dir: Path, db_instance: DatabaseManager, qapp):
-    from PySide6.QtGui import QKeyEvent
-    from PySide6.QtWidgets import QPushButton
-
+def test_atomic_tag_deletion_and_chip_close(temp_data_dir: Path, db_instance: DatabaseManager, qapp: QApplication) -> None:
     # Given: ChatTab with a document attached via inline @ and another via + context
     chat_tab = ChatTab(db=db_instance)
     chat_tab.show()
@@ -164,7 +166,7 @@ def test_atomic_tag_deletion_and_chip_close(temp_data_dir: Path, db_instance: Da
     assert "scenarios/tax_scenario_2024.json" not in chat_tab._bottom_attached_docs
 
 
-def test_chat_tab_toggle_tool_calls_visibility(db_instance: DatabaseManager, qapp):
+def test_chat_tab_toggle_tool_calls_visibility(db_instance: DatabaseManager, qapp: QApplication) -> None:
     # Given: ChatTab with active session containing assistant message with tool calls
     chat_tab = ChatTab(db=db_instance)
     chat_tab._on_new_chat_clicked()
@@ -186,7 +188,7 @@ def test_chat_tab_toggle_tool_calls_visibility(db_instance: DatabaseManager, qap
 
     # When: Toggle button is clicked to hide tool calls
     chat_tab._toggle_tools_btn.click()
-    qapp.processEvents()
+    qapp.processEvents()  # pyright: ignore[reportUnknownMemberType]
 
     # Then: Button state and text update to "Tool Calls: Hidden" and tool call card is removed from render
     assert not chat_tab._toggle_tools_btn.isChecked()
@@ -196,7 +198,7 @@ def test_chat_tab_toggle_tool_calls_visibility(db_instance: DatabaseManager, qap
 
     # When: Toggle button is clicked again to re-enable visibility
     chat_tab._toggle_tools_btn.click()
-    qapp.processEvents()
+    qapp.processEvents()  # pyright: ignore[reportUnknownMemberType]
 
     # Then: Button state and text return to "Tool Calls: Visible" and tool call card is re-rendered
     assert chat_tab._toggle_tools_btn.isChecked()

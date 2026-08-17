@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
-from backend.llm.interaction_logger import log_interaction
+from backend.llm.interaction_logger import (
+    log_interaction,
+    log_request_start,
+    log_response_finish,
+)
 
 
 def test_log_interaction_creates_formatted_text_and_jsonl(tmp_path: Path):
@@ -53,8 +57,6 @@ def test_log_interaction_creates_formatted_text_and_jsonl(tmp_path: Path):
 
 
 def test_immediate_request_start_logging(tmp_path: Path):
-    from backend.llm.interaction_logger import log_request_start, log_response_finish
-
     # Given: Target log dir and prompt
     log_dir = tmp_path / "logs"
     prompt_text = "Detailed tax query"

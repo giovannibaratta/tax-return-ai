@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
 )
 
 from backend.chat.agent import ChatDeps
-from backend.chat.context_loader import format_prompt_with_context, load_context_doc
 from backend.chat.models import (
     AttachedContextDoc,
     ChatMessage,
@@ -39,6 +38,7 @@ from src.ui.base_tab import BaseAppTab
 from src.ui.chat_input_widgets import ContextChipWidget, ContextTextEdit
 from src.ui.config import UIConfig
 from src.ui.context_file_selector import ContextFileSelectorWidget
+from src.ui.context_loader import format_prompt_with_context, load_context_doc
 from src.ui.workers import ChatWorker
 
 if TYPE_CHECKING:

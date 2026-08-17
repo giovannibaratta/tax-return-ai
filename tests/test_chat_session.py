@@ -15,6 +15,7 @@ from backend.utils.agents import (
     FinancialRecordResource,
     ToolCallInfo,
 )
+from src.jurisdiction.ireland.tax_form_models import IrishForm11State, IrishTaxFilingSession
 
 
 def test_session_store_crud() -> None:
@@ -135,8 +136,6 @@ def test_session_store_in_memory_until_saved() -> None:
 
 def test_tax_filing_session_store() -> None:
     # Given: A specialized session store for IrishTaxFilingSession
-    from src.jurisdiction.ireland.tax_form_models import IrishForm11State, IrishTaxFilingSession
-
     with tempfile.TemporaryDirectory() as tmp_dir:
         filing_store = SessionStore(sessions_dir=tmp_dir, session_cls=IrishTaxFilingSession)
 

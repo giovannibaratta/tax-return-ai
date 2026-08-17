@@ -11,7 +11,6 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from backend.db_manager import DatabaseManager
-from backend.deliberation.court_tools import register_tools
 from backend.deliberation.models import CourtVerdict, DebateResult, EvidenceChunk
 from backend.deliberation.pydantic_agents import (
     CourtDeps,
@@ -24,6 +23,7 @@ from backend.llm.pydantic_utils import (
     get_cache_settings,
     log_agent_usage,
 )
+from backend.tools.tax_tools import register_tax_tools
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,11 @@ class CourtroomSession:
     4. **Judge (Compliance Arbiter):** Issues the final ruling and returns a validated
        ``VerificationBlock`` via PydanticAI structured output — no manual JSON parsing.
 
-    Each agent has access to three tools via ``court_tools.register_tools``:
-    - ``search_evidence``: Semantic KNN search over the regulatory DB.
+    Each agent has access to regulatory, arithmetic, and transaction tools via ``register_tax_tools``:
+    - ``query_tax_knowledge``: Semantic search over the regulatory DB.
     - ``get_chunk``: Retrieve a chunk by primary key.
     - ``calculate``: Sandboxed arithmetic evaluator for verified tax math.
+    - ``get_financial_record`` / ``filter_financial_records``: Query financial transaction records.
 
     Evidence retrieved during ``_load_evidence`` forms a stable prompt prefix injected
     into every agent turn, enabling prompt-cache reuse in caching-aware providers.
@@ -96,7 +97,7 @@ class CourtroomSession:
         self.judge_agent: Agent[CourtDeps, CourtVerdict] = make_judge_agent(judge_model)
 
         # Register tools on all agents
-        register_tools(self.plaintiff_agent, self.defense_agent, self.judge_agent)
+        register_tax_tools(self.plaintiff_agent, self.defense_agent, self.judge_agent)
 
         # Evidence pool populated once at construction via semantic search
         self.retrieved_evidence: list[EvidenceChunk] = []
@@ -204,7 +205,6 @@ class CourtroomSession:
         deps = CourtDeps(
             db=self.db,
             embedding_runner=self.embedding_runner,
-            jurisdiction=self.jurisdiction,
         )
 
         prefix = self._compile_debate_context_prefix()
