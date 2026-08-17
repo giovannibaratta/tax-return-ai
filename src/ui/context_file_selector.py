@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from backend.chat.context_loader import get_data_dir
+from backend.config import get_app_config
 
 
 class ContextFileSelectorWidget(QFrame):
@@ -43,7 +43,8 @@ class ContextFileSelectorWidget(QFrame):
         """
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self._data_dir = (data_dir or get_data_dir()).resolve()
+        app_config_data_dir = get_app_config().data_dir
+        self._data_dir = (data_dir or app_config_data_dir).resolve()
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
@@ -94,6 +95,15 @@ class ContextFileSelectorWidget(QFrame):
         self._tree.installEventFilter(self)
         layout.addWidget(self._tree)
 
+        self._populate_tree()
+
+    def set_data_dir(self, data_dir: Path) -> None:
+        """Update root data directory and refresh tree contents.
+
+        Args:
+            data_dir: New root data directory Path.
+        """
+        self._data_dir = data_dir.resolve()
         self._populate_tree()
 
     def _populate_tree(self) -> None:

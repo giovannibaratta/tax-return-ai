@@ -29,11 +29,12 @@ from src.jurisdiction.ireland.tax_form_models import (
     IrishUndeterminedState,
     TaxFilingMetadata,
 )
+from src.ui.base_tab import BaseAppTab
 from src.ui.chat_tab import ChatTab
 from src.ui.config import UIConfig
 
 
-class IrishTaxReportTab(QWidget):
+class IrishTaxReportTab(BaseAppTab):
     """A tab containing a dynamic tax form on the left and an AI assistant on the right."""
 
     def __init__(
@@ -62,6 +63,21 @@ class IrishTaxReportTab(QWidget):
 
         self._init_ui()
         self._populate_year_combo()
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state and dependencies in IrishTaxReportTab.
+
+        Args:
+            config: Newly applied UIConfig instance.
+        """
+        self._config = config
+        self._db = config.db
+        self._store = SessionStore(
+            sessions_dir=config.tax_filing_sessions_dir,
+            session_cls=IrishTaxFilingSession,
+        )
+        if self._chat_tab is not None:
+            self._chat_tab.reload_config(config)
 
     def _init_ui(self) -> None:
         """Set up the main UI layout."""

@@ -1,9 +1,8 @@
-from tests.utils import insert_financial_record
-from unittest.mock import patch
 """Tests for FinancialRecordsTab UI component (Flag for Attention, Approve Record, and Delete Record)."""
 
 from datetime import datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -12,6 +11,7 @@ from sqlmodel import SQLModel
 from backend.db_manager import DatabaseManager, MemoryDb
 from backend.db_models import FinancialRecord
 from src.ui.records_tab import FinancialRecordsTab
+from tests.utils import insert_financial_record
 
 
 @pytest.fixture(scope="session")
@@ -59,12 +59,14 @@ def test_flag_attention_status_change_with_confirmation(qapp, test_db: DatabaseM
     tab._table.selectRow(0)
 
     # When: User clicks Flag for Attention and confirms YES dialog
-    
-    
-    
-    monkeypatch.setattr("src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+
+    monkeypatch.setattr(
+        "src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
     monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", lambda self: 0)
-    monkeypatch.setattr("src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: 16384) # 16384 is QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(
+        "src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: 16384
+    )  # 16384 is QMessageBox.StandardButton.Yes
     monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", lambda self: 0)
     monkeypatch.setattr("src.ui.records_tab.QMessageBox.information", lambda *args, **kwargs: None)
     tab._flag_attention()
@@ -103,10 +105,10 @@ def test_approve_record_status_change_with_confirmation(qapp, test_db: DatabaseM
     tab._table.selectRow(0)
 
     # When: User clicks Approve Record and confirms YES dialog
-    
-    
-    
-    monkeypatch.setattr("src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+
+    monkeypatch.setattr(
+        "src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
     monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", lambda self: 0)
     monkeypatch.setattr("src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: 16384)
     monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", lambda self: 0)
@@ -147,9 +149,7 @@ def test_delete_record_with_confirmation(qapp, test_db: DatabaseManager, monkeyp
     tab._table.selectRow(0)
 
     # When: User clicks Delete Record and confirms YES dialog
-    
-    
-    
+
     with patch("src.ui.records_tab.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
         monkeypatch.setattr("src.ui.records_tab.QMessageBox.question", lambda *args, **kwargs: 16384)
     monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", lambda self: 0)

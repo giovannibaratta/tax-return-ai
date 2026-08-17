@@ -35,7 +35,9 @@ from backend.chat.tax_filing_agent import TaxFilingDeps
 from backend.db_manager import DatabaseManager
 from backend.utils.agents import SharedAgentDeps, ToolCallInfo
 from src.jurisdiction.ireland.tax_form_models import IrishTaxFilingSession
+from src.ui.base_tab import BaseAppTab
 from src.ui.chat_input_widgets import ContextChipWidget, ContextTextEdit
+from src.ui.config import UIConfig
 from src.ui.context_file_selector import ContextFileSelectorWidget
 from src.ui.workers import ChatWorker
 
@@ -45,7 +47,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ChatTab(QWidget):
+class ChatTab(BaseAppTab):
     """Conversational query tab with session menu, message log, and tool traces."""
 
     def __init__(
@@ -77,6 +79,16 @@ class ChatTab(QWidget):
 
         self._init_ui()
         self._load_sessions_list()
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state in ChatTab.
+
+        Args:
+            config: Newly applied UIConfig.
+        """
+        self._db = config.db
+        if self._selector_popup is not None:
+            self._selector_popup.set_data_dir(config.data_dir)
 
     def hide_sidebar(self) -> None:
         """Hide the left sidebar session list."""

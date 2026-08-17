@@ -21,15 +21,17 @@ with `no such module: vec0`. Isolating vector storage into `tax_vectors.db` keep
 
 import hashlib
 import os
+import sqlite3
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from decimal import Decimal
-from typing import Any
+from pathlib import Path
 from warnings import deprecated
 
 import sqlite_vec
 from sqlalchemy import PoolProxiedConnection, and_, event, func, or_, text
+from sqlalchemy.pool import ConnectionPoolEntry
 from sqlalchemy.sql.expression import ColumnElement
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
@@ -77,11 +79,11 @@ class MemoryDb:
 class LocalDb:
     """Local SQLite file database configuration."""
 
-    db_path: str = DEFAULT_DB_PATH
-    vector_db_path: str = DEFAULT_VECTOR_DB_PATH
+    db_path: str | Path = DEFAULT_DB_PATH
+    vector_db_path: str | Path = DEFAULT_VECTOR_DB_PATH
 
 
-def _run_migrations(db_path: str = DEFAULT_DB_PATH) -> None:
+def _run_migrations(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Run Liquibase YAML migrations to ensure the database schema is up-to-date.
 
     Args:
@@ -129,8 +131,8 @@ class DatabaseManager:
         auto_migrate: bool = True,
     ):
         self.config: MemoryDb | LocalDb = db_config
-        self.db_path = self.config.db_path
-        self.vector_db_path = self.config.vector_db_path
+        self.db_path = str(self.config.db_path)
+        self.vector_db_path = str(self.config.vector_db_path)
 
         # Run Liquibase migrations automatically for DEFAULT_DB_PATH
         if auto_migrate and isinstance(self.config, LocalDb):
@@ -138,7 +140,7 @@ class DatabaseManager:
 
         # Ensure database directories exist for local file databases
         if isinstance(self.config, LocalDb):
-            for path in (self.config.db_path, self.config.vector_db_path):
+            for path in (self.db_path, self.vector_db_path):
                 db_dir = os.path.dirname(path)
                 if db_dir and not os.path.exists(db_dir):
                     os.makedirs(db_dir, exist_ok=True)
@@ -152,7 +154,9 @@ class DatabaseManager:
         )
 
         @event.listens_for(self.vector_engine, "connect")
-        def load_vec_extension(dbapi_connection: Any, connection_record: Any) -> None:
+        def load_vec_extension(
+            dbapi_connection: sqlite3.Connection, connection_record: ConnectionPoolEntry
+        ) -> None:
             dbapi_connection.enable_load_extension(True)
             try:
                 sqlite_vec.load(dbapi_connection)

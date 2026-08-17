@@ -41,12 +41,14 @@ from backend.db_manager import DatabaseManager
 from backend.db_models import TaxDocumentMetadata
 from backend.deliberation.models import EvidenceChunk
 from backend.domain_models import IngestionDocumentSummary
+from src.ui.base_tab import BaseAppTab
 from src.ui.chat_tab import ChatTab
 from src.ui.classification_tab import AssetClassificationTab
 from src.ui.config import UIConfig
 from src.ui.profile_tab import TaxpayerProfileTab
 from src.ui.records_tab import FinancialRecordsTab
 from src.ui.report_tab import IrishTaxReportTab
+from src.ui.settings_tab import SettingsTab
 from src.ui.workers import IngestionWorker, SearchWorker
 
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ from src.ui.workers import IngestionWorker, SearchWorker
 # ---------------------------------------------------------------------------
 
 
-class RegulationsTab(QWidget):
+class RegulationsTab(BaseAppTab):
     """Two-panel tab: left side ingests PDFs, right side inspects chunks."""
 
     def __init__(self, db: DatabaseManager, parent: QWidget | None = None) -> None:
@@ -81,6 +83,15 @@ class RegulationsTab(QWidget):
         splitter.addWidget(self._build_ingest_panel())
         splitter.addWidget(self._build_inspect_panel())
         splitter.setSizes([420, 580])
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state and database connections in RegulationsTab.
+
+        Args:
+            config: Newly applied UIConfig instance.
+        """
+        self._db = config.db
+        self._load_documents()
 
     # ------------------------------------------------------------------
     # Panel builders
@@ -512,17 +523,47 @@ class MainWindow(QMainWindow):
 
         self._create_menu_bar()
 
-        tabs = QTabWidget()
-        tabs.setDocumentMode(True)
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
 
-        tabs.addTab(RegulationsTab(db=self._config.db), "Regulations")
-        tabs.addTab(IrishTaxReportTab(config=self._config), "Irish Tax Report")
-        tabs.addTab(ChatTab(db=self._config.db), "Chat")
-        tabs.addTab(FinancialRecordsTab(db=self._config.db), "Financial Records")
-        tabs.addTab(TaxpayerProfileTab(db=self._config.db), "Taxpayer Profile")
-        tabs.addTab(AssetClassificationTab(config=self._config), "Asset Classification")
+        self._tab_instances: list[BaseAppTab] = [
+            RegulationsTab(db=self._config.db),
+            IrishTaxReportTab(config=self._config),
+            ChatTab(db=self._config.db),
+            FinancialRecordsTab(db=self._config.db),
+            TaxpayerProfileTab(db=self._config.db),
+            AssetClassificationTab(config=self._config),
+        ]
+        tab_names = [
+            "Regulations",
+            "Irish Tax Report",
+            "Chat",
+            "Financial Records",
+            "Taxpayer Profile",
+            "Asset Classification",
+        ]
+        for tab, name in zip(self._tab_instances, tab_names):
+            self._tabs.addTab(tab, name)
 
-        self.setCentralWidget(tabs)
+        settings_tab = SettingsTab(config=self._config)
+        settings_tab.config_updated.connect(self._on_config_updated)
+        self._tabs.addTab(settings_tab, "Settings")
+        self._tab_instances.append(settings_tab)
+
+        self.setCentralWidget(self._tabs)
+
+    def _on_config_updated(self, new_config: UIConfig) -> None:
+        """Handle dynamic configuration updates from SettingsTab.
+
+        Args:
+            new_config: Newly applied UIConfig with updated paths and DatabaseManager.
+        """
+        self._config = new_config
+
+        for tab in self._tab_instances:
+            tab.reload_config(new_config)
+
+        self.statusBar().showMessage("Configuration & databases reloaded successfully.", 5000)
 
     def _create_menu_bar(self) -> None:
         """Build macOS-style top menu bar with View -> Font size controls."""

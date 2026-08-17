@@ -34,6 +34,7 @@ from src.jurisdiction.ireland.cgt_models import (
     infer_tax_regime,
     parse_irish_tax_regime,
 )
+from src.ui.base_tab import BaseAppTab
 from src.ui.config import UIConfig
 
 # Descriptions of tax rules for each Irish regime
@@ -121,7 +122,7 @@ def _detect_asset_traits_from_metadata(
     return category, domicile
 
 
-class AssetClassificationTab(QWidget):
+class AssetClassificationTab(BaseAppTab):
     """UI tab for managing ISIN tax classification, UCITS status, and OpenFIGI enrichment."""
 
     def __init__(self, config: UIConfig, parent: QWidget | None = None) -> None:
@@ -166,6 +167,16 @@ class AssetClassificationTab(QWidget):
         splitter.setSizes([360, 340])
         root.addWidget(splitter)
 
+        self.load_classifications()
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state in AssetClassificationTab.
+
+        Args:
+            config: Newly applied UIConfig.
+        """
+        self._config = config
+        self._db = config.db
         self.load_classifications()
 
     # ------------------------------------------------------------------

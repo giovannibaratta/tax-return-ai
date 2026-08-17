@@ -336,6 +336,31 @@ class PIIPipeline:
             text = text[: result.start] + placeholder + text[result.end :]
         return AnonymizationPassResult(text=text, placeholders=new_placeholders)
 
+    def _write_log_file(
+        self,
+        log_dir: str | None,
+        document_name: str | None,
+        attempt: int,
+        system_instruction: str,
+        prompt: str,
+        raw_response: str,
+    ) -> None:
+        """Helper to write raw LLM responses to a log file for debugging."""
+        if log_dir and document_name:
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                safe_doc_name = "".join(
+                    c if c.isalnum() or c in ("-", "_", ".") else "_" for c in document_name
+                )
+                log_filename = os.path.join(log_dir, f"{safe_doc_name}_pii_redaction_attempt_{attempt}.txt")
+                with open(log_filename, "w", encoding="utf-8") as f:
+                    _ = f.write(f"=== SYSTEM PROMPT ===\n{system_instruction}\n\n")
+                    _ = f.write(f"=== PROMPT ===\n{prompt}\n\n")
+                    _ = f.write(f"=== RAW RESPONSE ===\n{raw_response}\n")
+                logger.info("Saved raw PII redaction response log to: %s", log_filename)
+            except Exception as log_err:
+                logger.warning("Failed to save raw PII redaction log: %s", log_err)
+
     def _apply_openai_privacy_filter(self, text: str, session: PIISession) -> AnonymizationPassResult:
         """
         Run the OpenAI Privacy Filter model over *text* and replace any newly
@@ -443,22 +468,14 @@ class PIIPipeline:
             try:
                 raw_response = runner.complete(prompt=text, system_instruction=system_instruction)
 
-                # TODO: Move to private helper to keep main logic clean
-                # Save raw response to log file if log_dir is provided
-                if log_dir and document_name:
-                    try:
-                        os.makedirs(log_dir, exist_ok=True)
-                        safe_doc_name = "".join(
-                            c if c.isalnum() or c in ("-", "_", ".") else "_" for c in document_name
-                        )
-                        log_filename = os.path.join(log_dir, f"{safe_doc_name}_pii_redaction_attempt_{attempt}.txt")
-                        with open(log_filename, "w", encoding="utf-8") as f:
-                            _ = f.write(f"=== SYSTEM PROMPT ===\n{system_instruction}\n\n")
-                            _ = f.write(f"=== PROMPT ===\n{text}\n\n")
-                            _ = f.write(f"=== RAW RESPONSE ===\n{raw_response}\n")
-                        logger.info("Saved raw PII redaction response log to: %s", log_filename)
-                    except Exception as log_err:
-                        logger.warning("Failed to save raw PII redaction log: %s", log_err)
+                self._write_log_file(
+                    log_dir,
+                    document_name,
+                    attempt,
+                    system_instruction,
+                    text,
+                    raw_response,
+                )
 
                 cleaned_resp = BaseLLMRunner.clean_json_response(raw_response)
                 data = json.loads(cleaned_resp, strict=False)

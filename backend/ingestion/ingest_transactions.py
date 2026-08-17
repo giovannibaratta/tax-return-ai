@@ -8,10 +8,18 @@ import argparse
 import logging
 import os
 import sys
+from typing import Annotated, Literal
 
 import dotenv
+from pydantic import Field, TypeAdapter
 from sqlmodel import Session
 
+from backend.cli_common import (
+    CommonConfigArgs,
+    build_common_config_parser,
+    parse_typed_args,
+)
+from backend.config import AppConfig
 from backend.db_manager import DatabaseManager, LocalDb
 from backend.db_models import FinancialRecord, IngestedSourceDocument, StagedFinancialRecord
 from backend.ingestion.directa_csv_parser import parse_directa_csv
@@ -119,15 +127,45 @@ def print_pipeline_summary(
     print("=" * 80 + "\n")
 
 
+class IngestSubcommandArgs(CommonConfigArgs):
+    """Arguments for 'ingest' subcommand."""
+
+    command: Literal["ingest"]
+    mode: Literal["api", "local", "mock"] = "api"
+    test: bool = False
+    force: bool = False
+    force_pii_reprocessing: bool = False
+    parser: str = "chandra"
+    force_ocr: bool = False
+    file: str | None = None
+    folder: str | None = None
+    path: str | None = None
+
+
+class ListSubcommandArgs(CommonConfigArgs):
+    """Arguments for 'list' subcommand."""
+
+    command: Literal["list"]
+
+
+class DeleteSubcommandArgs(CommonConfigArgs):
+    """Arguments for 'delete' subcommand."""
+
+    command: Literal["delete"]
+    delete_record: int | None = None
+    delete_all: bool = False
+
+
+TransactionCliArgs = Annotated[
+    IngestSubcommandArgs | ListSubcommandArgs | DeleteSubcommandArgs,
+    Field(discriminator="command"),
+]
+TRANSACTION_CLI_ADAPTER: TypeAdapter[TransactionCliArgs] = TypeAdapter(TransactionCliArgs)
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build and return argument parser with subcommands for transaction ingestion CLI."""
-    parent_parser = argparse.ArgumentParser(add_help=False)
-    _ = parent_parser.add_argument(
-        "--db",
-        type=str,
-        default=None,
-        help="Path to SQLite database file. Defaults to TAX_DB_PATH env var.",
-    )
+    parent_parser = build_common_config_parser()
 
     parser = argparse.ArgumentParser(
         description="Tax Transaction Ingestion Subsystem CLI",
@@ -330,21 +368,24 @@ def _collect_target_files(target_path: str) -> list[tuple[str, str | None, str |
     return to_process
 
 
-def _handle_batch_ingestion(db: DatabaseManager, args: argparse.Namespace) -> None:
+def _handle_batch_ingestion(
+    db: DatabaseManager, args: IngestSubcommandArgs, app_config: AppConfig
+) -> None:
     """Handle batch document ingestion logic.
 
     Args:
         db: Active DatabaseManager instance.
-        args: Parsed CLI arguments namespace.
+        args: Parsed typed IngestSubcommandArgs.
+        app_config: Resolved application configuration instance.
     """
     runners: list[BaseLLMRunner] = []
     pii_pipeline: PIIPipeline = PIIPipeline()
 
-    mode_str: str = str(args.mode)
-    parser_str: str = str(args.parser)
-    force_flag: bool = bool(args.force)
-    force_pii_flag: bool = bool(args.force_pii_reprocessing)
-    force_ocr_flag: bool = bool(args.force_ocr)
+    mode_str: str = args.mode
+    parser_str: str = args.parser
+    force_flag: bool = args.force
+    force_pii_flag: bool = args.force_pii_reprocessing
+    force_ocr_flag: bool = args.force_ocr
 
     if mode_str == "mock":
         print("🏛️  Initializing Consensus Pipeline in OFFLINE MOCK MODE...")
@@ -366,7 +407,8 @@ def _handle_batch_ingestion(db: DatabaseManager, args: argparse.Namespace) -> No
 
     print_pipeline_summary(mode_str, parser_str, runners, pii_pipeline)
 
-    target_path: str = str(args.file or args.folder or args.path or "data/raw_sources/records")
+    raw_target = args.file or args.folder or args.path
+    target_path: str = str(raw_target) if raw_target else str(app_config.raw_records_dir)
 
     if not os.path.exists(target_path):
         print(f"Error: Specified path '{target_path}' not found.", file=sys.stderr)
@@ -458,43 +500,42 @@ def main() -> None:
     log_env_vars(logging.getLogger(__name__))
 
     parser = _build_arg_parser()
-    args = parser.parse_args()
+    args: TransactionCliArgs = parse_typed_args(parser, TRANSACTION_CLI_ADAPTER)
+    app_config = args.resolve_app_config()
 
-    command: str = str(args.command)
-
-    db = DatabaseManager(db_config=LocalDb(db_path=args.db))
+    db = DatabaseManager(
+        db_config=LocalDb(
+            db_path=app_config.db_path,
+            vector_db_path=app_config.vector_db_path,
+        )
+    )
 
     try:
-        if command == "list":
+        if args.command == "list":
             _handle_list(db)
             return
 
-        if command == "delete":
-            if getattr(args, "delete_record", None) is not None:
-                _handle_delete_record(db, int(args.delete_record))
-            elif getattr(args, "delete_all", False):
+        if args.command == "delete":
+            if args.delete_record is not None:
+                _handle_delete_record(db, args.delete_record)
+            elif args.delete_all:
                 _handle_delete_all(db)
             return
 
-        if command == "ingest":
-            # Default command: ingest
-            mode_val = getattr(args, "mode", "api")
-            test_val = getattr(args, "test", False)
-            if mode_val == "mock" and not test_val:
+        if args.command == "ingest":
+            if args.mode == "mock" and not args.test:
                 print(
-                    f"❌ Error: Running in non-production mode ('{mode_val}') requires explicit '--test' flag.",
+                    f"❌ Error: Running in non-production mode ('{args.mode}') requires explicit '--test' flag.",
                     file=sys.stderr,
                 )
                 print(
-                    f"   Usage: python backend/ingestion/ingest_transactions.py ingest --mode {mode_val} --test",
+                    f"   Usage: python backend/ingestion/ingest_transactions.py ingest --mode {args.mode} --test",
                     file=sys.stderr,
                 )
                 sys.exit(1)
 
-            _handle_batch_ingestion(db, args)
+            _handle_batch_ingestion(db, args, app_config)
             return
-
-        print("Usage: python backend/ingestion/ingest_transactions.py [list|ingest|delete] ...")
 
     finally:
         db.close()

@@ -1,9 +1,11 @@
 import argparse
 import logging
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
 
+from backend.cli_common import CommonConfigArgs, add_common_config_args, parse_typed_args
 from backend.db_manager import DatabaseManager, LocalDb
 from backend.domain_models import ConfidenceLevel, SourceType
 from backend.ingestion.chunker import LateChunker
@@ -236,24 +238,25 @@ def ingest_research_document(  # noqa: PLR0917
             confidence_level=ConfidenceLevel.MEDIUM,
         )
 
-    print(
-        f"Successfully ingested research '{document_name}' into vector database ({len(processed_chunks)} total chunks)."
-    )
+
+class IngestDocCliArgs(CommonConfigArgs):
+    """Typed CLI arguments model for tax document batch ingestion."""
+
+    force: bool = False
+    force_chunking: bool = False
+    force_ocr: bool = False
+    file: str | None = None
+    parser: str = "chandra"
+    research_dir: str | None = None
+    mode: Literal["regulations", "research", "all"] = "all"
 
 
-def main():
-
-    log_env_vars(logging.getLogger(__name__))
-
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build and configure ArgumentParser for tax document batch ingestion."""
     arg_parser = argparse.ArgumentParser(
         description="Tax Document Batch Ingestion Subsystem (Late Chunking + sqlite-vec)"
     )
-    _ = arg_parser.add_argument(
-        "--db",
-        type=str,
-        default="database/tax_data.db",
-        help="Path to SQLite database file",
-    )
+    add_common_config_args(arg_parser)
     _ = arg_parser.add_argument(
         "--force",
         action="store_true",
@@ -288,8 +291,8 @@ def main():
     _ = arg_parser.add_argument(
         "--research-dir",
         type=str,
-        default="data/research",
-        help="Path to research markdown files directory (default: data/research)",
+        default=None,
+        help="Path to research markdown files directory (defaults to <data-dir>/research)",
     )
     _ = arg_parser.add_argument(
         "--mode",
@@ -298,13 +301,26 @@ def main():
         choices=["regulations", "research", "all"],
         help="Ingestion mode: regulations (PDFs), research (Markdown), or all (default: all)",
     )
-    args = arg_parser.parse_args()
+    return arg_parser
+
+
+def main() -> None:
+    log_env_vars(logging.getLogger(__name__))
+
+    arg_parser = _build_arg_parser()
+    args = parse_typed_args(arg_parser, IngestDocCliArgs)
+    app_config = args.resolve_app_config()
 
     effective_force = args.force or args.force_chunking or args.force_ocr
     effective_force_ocr = args.force or args.force_ocr
 
     # Initialize DB Manager
-    db = DatabaseManager(db_config=LocalDb(db_path=args.db))
+    db = DatabaseManager(
+        db_config=LocalDb(
+            db_path=app_config.db_path,
+            vector_db_path=app_config.vector_db_path,
+        )
+    )
 
     # Initialize Late Chunker (BGE-M3)
     chunker = LateChunker()
@@ -345,7 +361,7 @@ def main():
 
         # Batch directory scanning mode: Regulations
         if args.mode in ("regulations", "all"):
-            raw_sources_dir = "data/raw_sources/regulations"
+            raw_sources_dir = str(app_config.raw_regulations_dir)
             if os.path.exists(raw_sources_dir):
                 for root, _dirs, files in os.walk(raw_sources_dir):
                     for file_name in files:
@@ -366,7 +382,7 @@ def main():
 
         # Batch directory scanning mode: Research
         if args.mode in ("research", "all"):
-            research_dir = str(args.research_dir)
+            research_dir = str(args.research_dir) if args.research_dir else str(app_config.research_dir)
             if os.path.exists(research_dir):
                 for root, _dirs, files in os.walk(research_dir):
                     for file_name in files:

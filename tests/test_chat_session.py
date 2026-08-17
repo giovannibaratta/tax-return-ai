@@ -155,4 +155,3 @@ def test_tax_filing_session_store() -> None:
         assert loaded.form_state is not None
         assert loaded.form_state.tax_year == 2025
         assert loaded.form_state.form_type == "form11"
-        

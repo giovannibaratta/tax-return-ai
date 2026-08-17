@@ -29,6 +29,8 @@ from sqlmodel import Session, col, select
 
 from backend.db_manager import DatabaseManager
 from src.jurisdiction.ireland.cgt_models import ResidencyType, TaxpayerProfile, infer_residency_type
+from src.ui.base_tab import BaseAppTab
+from src.ui.config import UIConfig
 
 
 def _section_label(text: str) -> QLabel:
@@ -46,7 +48,7 @@ def _divider() -> QFrame:
     return line
 
 
-class TaxpayerProfileTab(QWidget):
+class TaxpayerProfileTab(BaseAppTab):
     """UI tab for managing tax residence and domicile status per tax year."""
 
     def __init__(self, db: DatabaseManager, parent: QWidget | None = None) -> None:
@@ -81,6 +83,15 @@ class TaxpayerProfileTab(QWidget):
         splitter.setSizes([350, 350])
         root.addWidget(splitter)
 
+        self.load_profiles()
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state in TaxpayerProfileTab.
+
+        Args:
+            config: Newly applied UIConfig.
+        """
+        self._db = config.db
         self.load_profiles()
 
     # ------------------------------------------------------------------

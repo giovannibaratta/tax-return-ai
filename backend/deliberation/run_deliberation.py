@@ -16,9 +16,11 @@ import logging
 import os
 import sys
 from datetime import datetime
+from typing import Literal
 
 import dotenv
 
+from backend.cli_common import CommonConfigArgs, add_common_config_args, parse_typed_args
 from backend.db_manager import DatabaseManager, LocalDb
 from backend.deliberation.courtroom import CourtroomSession
 from backend.deliberation.models import TaxScenario
@@ -38,7 +40,18 @@ logger = logging.getLogger(__name__)
 _ = dotenv.load_dotenv()
 
 
-def main():
+class DeliberationCliArgs(CommonConfigArgs):
+    """Strongly-typed arguments for courtroom deliberation CLI."""
+
+    scenario_desc: str | None = None
+    scenario_name: str = "Tax Court Case"
+    scenario_file: str | None = None
+    jurisdiction: Literal["italy", "ireland"] | None = None
+    verbose: bool = False
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build and configure the ArgumentParser for courtroom deliberation."""
     parser = argparse.ArgumentParser(description="Multi-Agent Courtroom Deliberation Engine (PROClaim & Tool-MAD)")
     _ = parser.add_argument("--scenario-desc", type=str, help="Full narrative description of the taxpayer scenario.")
     _ = parser.add_argument(
@@ -55,11 +68,15 @@ def main():
         choices=["italy", "ireland"],
         help="Select the tax case jurisdiction ('italy' or 'ireland'). Required if --scenario-file is not used.",
     )
-    _ = parser.add_argument("--db", type=str, default="database/tax_data.db", help="Path to SQLite database file")
-
+    add_common_config_args(parser)
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    return parser
 
-    args = parser.parse_args()
+
+def main() -> None:
+    parser = _build_arg_parser()
+    args = parse_typed_args(parser, DeliberationCliArgs)
+    app_config = args.resolve_app_config()
 
     log_level = "DEBUG" if args.verbose else "INFO"
     logging.getLogger("backend").setLevel(log_level)
@@ -100,10 +117,15 @@ def main():
             sys.exit(1)
 
     # 2. Initialize Database Manager
-    if not os.path.exists(args.db):
-        logger.error("Database file does not exist at '%s'. Please complete ingestion first.", args.db)
+    if not os.path.exists(str(app_config.db_path)):
+        logger.error("Database file does not exist at '%s'. Please complete ingestion first.", app_config.db_path)
         print("Connecting to database...")
-    db = DatabaseManager(db_config=LocalDb(db_path=args.db))
+    db = DatabaseManager(
+        db_config=LocalDb(
+            db_path=app_config.db_path,
+            vector_db_path=app_config.vector_db_path,
+        )
+    )
 
     # 3. Build per-agent PydanticAI models (each agent can use a different provider)
     try:
@@ -146,11 +168,11 @@ def main():
         # 7. Run Courtroom Debate Rounds
         result = session.run_debate()
 
-        # 8. Save transcript locally inside data/processed/timestamp/file_name
+        # 8. Save transcript locally inside <data_dir>/processed/<timestamp>/file_name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = os.path.join("data", "processed", timestamp)
-        os.makedirs(output_dir, exist_ok=True)
-        transcript_path = os.path.join(output_dir, f"transcript_{jurisdiction}.md")
+        output_dir = app_config.processed_dir / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = output_dir / f"transcript_{jurisdiction}.md"
         with open(transcript_path, "w", encoding="utf-8") as f:
             _ = f.write(result.full_transcript)
 

@@ -46,6 +46,8 @@ from backend.domain_models import (
 )
 from backend.ingestion.openfigi import OpenFIGIMapper
 from backend.portfolio import PortfolioEngine, PortfolioFilter, PortfolioPosition, PortfolioSnapshot
+from src.ui.base_tab import BaseAppTab
+from src.ui.config import UIConfig
 
 
 def _section_label(text: str) -> QLabel:
@@ -56,14 +58,7 @@ def _section_label(text: str) -> QLabel:
     return lbl
 
 
-def _divider() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    return line
-
-
-class FinancialRecordsTab(QWidget):
+class FinancialRecordsTab(BaseAppTab):
     """Widget for reviewing staged transactions, browsing approved records, and viewing portfolio snapshot."""
 
     def __init__(self, db: DatabaseManager, parent: QWidget | None = None) -> None:
@@ -108,6 +103,15 @@ class FinancialRecordsTab(QWidget):
         root.addWidget(self._tabs)
 
         # Load initial data
+        self.load_all_data()
+
+    def reload_config(self, config: UIConfig) -> None:
+        """Reload configuration state in FinancialRecordsTab.
+
+        Args:
+            config: Newly applied UIConfig.
+        """
+        self._db = config.db
         self.load_all_data()
 
     def load_records(self) -> None:
@@ -1515,7 +1519,9 @@ class FinancialRecordsTab(QWidget):
             isin_match = (rec.isin or "").lower() == (pos.isin or "").lower() if pos.isin else True
             prov_match = (rec.provider or "").lower() == (pos.provider or "").lower() if pos.provider else True
             jur_match = (
-                (rec.account_country or "").lower() == (pos.account_country or "").lower() if pos.account_country else True
+                (rec.account_country or "").lower() == (pos.account_country or "").lower()
+                if pos.account_country
+                else True
             )
 
             if (
@@ -1763,7 +1769,9 @@ class FinancialRecordsTab(QWidget):
                 try:
                     eff_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 except ValueError:
-                    QMessageBox.warning(self, "Invalid Date", "Please enter date in format YYYY-MM-DD (e.g. 2025-02-20).")
+                    QMessageBox.warning(
+                        self, "Invalid Date", "Please enter date in format YYYY-MM-DD (e.g. 2025-02-20)."
+                    )
                     return
             else:
                 eff_date = parsed_dt

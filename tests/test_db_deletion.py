@@ -5,7 +5,7 @@ import pytest
 
 from backend.db_manager import DatabaseManager, LocalDb
 from backend.db_models import FinancialRecord
-from backend.domain_models import AssetType, TransactionAction
+from backend.domain_models import AssetType, ConfidenceLevel, SourceType, TransactionAction
 from tests.utils import insert_financial_record
 
 
@@ -27,6 +27,8 @@ def test_delete_all_chunks(db_instance: DatabaseManager):
         chunk_index=0,
         embedding=[0.1] * 1024,
         document_sha="abc123sha",
+        source_type=SourceType.REGULATION,
+        confidence_level=ConfidenceLevel.HIGH,
     )
     db_instance.insert_chunk(
         document_name="test_doc.pdf",
@@ -36,8 +38,10 @@ def test_delete_all_chunks(db_instance: DatabaseManager):
         chunk_index=1,
         embedding=[0.2] * 1024,
         document_sha="abc123sha",
+        source_type=SourceType.REGULATION,
+        confidence_level=ConfidenceLevel.HIGH,
     )
-    financial_rec = insert_financial_record(db_instance, 
+    financial_rec = insert_financial_record(db_instance,
         FinancialRecord(
             account_country="italy",
             tax_year=2025,
