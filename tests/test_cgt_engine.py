@@ -19,12 +19,16 @@ from src.jurisdiction.ireland.cgt_engine import (
     get_tax_rate,
     match_lots_fifo,
 )
+from src.jurisdiction.ireland.cgt_engine import (
+    compute_disposal as cgt_compute_disposal,
+)
 from src.jurisdiction.ireland.cgt_models import (
     AssetTaxClassification,
     IrishTaxRegime,
     LotMatch,
     RemittanceEvent,
     ResidencyType,
+    ResolvedDisposalInput,
     SimulatedDisposalInput,
     StrictDisposalInput,
     TaxpayerProfile,
@@ -187,9 +191,7 @@ def test_taxability_resident_domiciled():
         domicile_country="US",
     )
 
-    taxable, remittance = determine_irish_taxability(
-        profile, cls, is_remitted=False, is_irish_specified_asset=False
-    )
+    taxable, remittance = determine_irish_taxability(profile, cls, is_remitted=False, is_irish_specified_asset=False)
 
     assert taxable is True
     assert remittance is False
@@ -1356,3 +1358,153 @@ def test_apply_section581_quarantine_spanning_multiple_repurchase_lots():
     assert result[1].is_section581_restricted is True
     assert result[1].section581_repurchase_record_id == 11
     assert result[1].gain_loss_eur == Decimal("-500.00")
+
+
+def test_section581_same_calendar_day_purchases() -> None:
+    # Test same-calendar-day edge cases for Section 581 matching
+    # Sell is at 12:00 PM on 2025-03-15
+    # Buy 1: older lot (outside 28-day window, 2025-01-05) @ €100
+    # Buy 2: same day, 10:00 AM (BEFORE sell) @ €110 -> Must be matched first (Section 581)
+    # Buy 3: same day, 12:00 PM (EXACT sell time) @ €120 -> Must be matched next (Section 581)
+    # Buy 4: same day, 14:00 PM (AFTER sell) @ €130 -> MUST NOT BE MATCHED
+
+    sell_dt = datetime(2025, 3, 15, 12, 0, tzinfo=timezone.utc)
+
+    buy_older = TradeRecord(
+        id=1,
+        provider="interactive_brokers",
+        ingestion_timestamp=datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
+        source_file_sha="sha1",
+        event_timestamp=datetime(2025, 1, 5, 10, 0, tzinfo=timezone.utc),
+        asset_type=AssetType.STOCK,
+        identity=AssetIdentity(symbol="AAPL", isin="US0378331005"),
+        action=TransactionAction.BUY,
+        quantity=Decimal("5"),
+        unit_price=Decimal("100"),
+        currency="EUR",
+        fees=Decimal("0"),
+        total_amount=Decimal("500"),
+        fx_rate=Decimal("1.0"),
+        local_total_amount=Decimal("500"),
+        account_country="ireland",
+        tax_year=2025,
+        verification_status=VerificationStatus.APPROVED,
+    )
+
+    buy_same_day_before = TradeRecord(
+        id=2,
+        provider="interactive_brokers",
+        ingestion_timestamp=datetime(2025, 3, 15, 0, 0, tzinfo=timezone.utc),
+        source_file_sha="sha2",
+        event_timestamp=datetime(2025, 3, 15, 10, 0, tzinfo=timezone.utc),
+        asset_type=AssetType.STOCK,
+        identity=AssetIdentity(symbol="AAPL", isin="US0378331005"),
+        action=TransactionAction.BUY,
+        quantity=Decimal("5"),
+        unit_price=Decimal("110"),
+        currency="EUR",
+        fees=Decimal("0"),
+        total_amount=Decimal("550"),
+        fx_rate=Decimal("1.0"),
+        local_total_amount=Decimal("550"),
+        account_country="ireland",
+        tax_year=2025,
+        verification_status=VerificationStatus.APPROVED,
+    )
+
+    buy_same_day_exact = TradeRecord(
+        id=3,
+        provider="interactive_brokers",
+        ingestion_timestamp=datetime(2025, 3, 15, 0, 0, tzinfo=timezone.utc),
+        source_file_sha="sha3",
+        event_timestamp=datetime(2025, 3, 15, 12, 0, tzinfo=timezone.utc),
+        asset_type=AssetType.STOCK,
+        identity=AssetIdentity(symbol="AAPL", isin="US0378331005"),
+        action=TransactionAction.BUY,
+        quantity=Decimal("5"),
+        unit_price=Decimal("120"),
+        currency="EUR",
+        fees=Decimal("0"),
+        total_amount=Decimal("600"),
+        fx_rate=Decimal("1.0"),
+        local_total_amount=Decimal("600"),
+        account_country="ireland",
+        tax_year=2025,
+        verification_status=VerificationStatus.APPROVED,
+    )
+
+    buy_same_day_after = TradeRecord(
+        id=4,
+        provider="interactive_brokers",
+        ingestion_timestamp=datetime(2025, 3, 15, 0, 0, tzinfo=timezone.utc),
+        source_file_sha="sha4",
+        event_timestamp=datetime(2025, 3, 15, 14, 0, tzinfo=timezone.utc),
+        asset_type=AssetType.STOCK,
+        identity=AssetIdentity(symbol="AAPL", isin="US0378331005"),
+        action=TransactionAction.BUY,
+        quantity=Decimal("5"),
+        unit_price=Decimal("130"),
+        currency="EUR",
+        fees=Decimal("0"),
+        total_amount=Decimal("650"),
+        fx_rate=Decimal("1.0"),
+        local_total_amount=Decimal("650"),
+        account_country="ireland",
+        tax_year=2025,
+        verification_status=VerificationStatus.APPROVED,
+    )
+
+    resolved_sell = ResolvedDisposalInput(
+        isin="US0378331005",
+        asset_name="Apple",
+        sell_quantity=Decimal("12"),
+        sell_unit_price_eur=Decimal("150"),
+        sell_fees_eur=Decimal("0"),
+        sell_date=sell_dt,
+        disposal_record_id=10,
+        is_simulation=False,
+    )
+
+    classification = AssetTaxClassification(
+        isin="US0378331005",
+        asset_name="Apple",
+        tax_regime=IrishTaxRegime.CGT_STANDARD.value,
+        domicile_country="US",
+    )
+
+    profile = TaxpayerProfile(
+        tax_year=2025,
+        fiscal_residence_country="IE",
+        domicile_country="IE",
+        residency_type=ResidencyType.RESIDENT_DOMICILED,
+        marginal_tax_rate=Decimal("0.40"),
+    )
+
+    # We are selling 12 units.
+    # It must match:
+    # 1. 5 units from buy_same_day_before (Section 581, earliest in 4 weeks) @ 110
+    # 2. 5 units from buy_same_day_exact (Section 581, exact same time) @ 120
+    # 3. 2 units from buy_older (Section 580 FIFO) @ 100
+    # It MUST NOT match buy_same_day_after, even though it's on the same day.
+
+    buy_lots = [buy_older, buy_same_day_before, buy_same_day_exact, buy_same_day_after]
+
+    res = cgt_compute_disposal(
+        resolved=resolved_sell,
+        buy_lots=buy_lots,
+        classification=classification,
+        profile=profile,
+    )
+
+    matches = res.lot_matches
+    assert len(matches) == 3
+
+    # Check matching order and properties
+    assert matches[0].source_record_id == 2
+    assert matches[0].matched_quantity == Decimal("5")
+
+    assert matches[1].source_record_id == 3
+    assert matches[1].matched_quantity == Decimal("5")
+
+    assert matches[2].source_record_id == 1
+    assert matches[2].matched_quantity == Decimal("2")
