@@ -114,13 +114,20 @@ class IrishTaxReportTab(BaseAppTab):
 
         self._btn_assess = QPushButton("Run Initial Assessment")
         self._btn_assess.setStyleSheet(
-            "QPushButton { background-color: #2563eb; color: white; font-weight: bold; padding: 5px 12px; border-radius: 4px; }"
-            "QPushButton:disabled { background-color: #94a3b8; }"
+            "QPushButton { background-color: #2563eb; color: white; font-weight: bold; "
+            "padding: 5px 12px; border-radius: 4px; }\n"
+            "QPushButton:disabled { background-color: #94a3b8; }\n"
             "QPushButton:hover:!disabled { background-color: #1d4ed8; }"
         )
         self._btn_assess.setEnabled(False)
+
         self._btn_assess.clicked.connect(self._on_run_assessment_clicked)
         top_bar.addWidget(self._btn_assess)
+
+        self._btn_delete_return = QPushButton("🗑️ Delete Return")
+        self._btn_delete_return.setEnabled(False)
+        self._btn_delete_return.clicked.connect(self._on_delete_return_clicked)
+        top_bar.addWidget(self._btn_delete_return)
 
         top_bar.addStretch()
         root.addLayout(top_bar)
@@ -165,9 +172,7 @@ class IrishTaxReportTab(BaseAppTab):
 
         self._year_combo.blockSignals(False)
 
-        target_year = (
-            select_year if select_year is not None else (sorted_years[0] if sorted_years else None)
-        )
+        target_year = select_year if select_year is not None else (sorted_years[0] if sorted_years else None)
         if target_year is not None:
             idx = self._year_combo.findText(str(target_year))
             if idx >= 0:
@@ -181,8 +186,44 @@ class IrishTaxReportTab(BaseAppTab):
             self._on_year_selected(str(sorted_years[0]))
         else:
             self._btn_assess.setEnabled(False)
+            self._btn_delete_return.setEnabled(False)
             self._form_title_label.setText("<b>Tax Return State: No Active Return</b>")
             self._tree.clear()
+            if self._chat_tab is not None:
+                self._chat_layout.removeWidget(self._chat_tab)
+                self._chat_tab.deleteLater()
+                self._chat_tab = None
+
+    def _on_delete_return_clicked(self) -> None:
+        """Prompt confirmation and delete the active tax return session to start from scratch."""
+        if not self._year_combo.currentText():
+            return
+
+        year = self._current_year
+        session_id = f"irish_report_{year}"
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete Return",
+            f"Are you sure you want to delete the Irish Tax Return for {year}?\n\n"
+            "This will delete the current form draft and chat history for this year so you can start from scratch.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._store.delete_session(session_id)
+            if self._chat_tab is not None:
+                self._chat_layout.removeWidget(self._chat_tab)
+                self._chat_tab.deleteLater()
+                self._chat_tab = None
+
+            self._form_state = None
+            self._tree.clear()
+            self._btn_assess.setEnabled(False)
+            self._btn_delete_return.setEnabled(False)
+            self._form_title_label.setText("<b>Tax Return State: No Active Return</b>")
+
+            self._populate_year_combo()
 
     def _on_year_selected(self, year_str: str) -> None:
         """Handle year selection change to immediately load and display return session."""
@@ -284,6 +325,7 @@ class IrishTaxReportTab(BaseAppTab):
         self._chat_layout.addWidget(self._chat_tab)
 
         self._btn_assess.setEnabled(True)
+        self._btn_delete_return.setEnabled(True)
         self._refresh_form_view()
 
     def _on_run_assessment_clicked(self) -> None:
@@ -337,7 +379,10 @@ class IrishTaxReportTab(BaseAppTab):
             )
             decision_item.setExpanded(True)
 
-        if isinstance(self._form_state, (IrishForm11State, IrishForm12State, IrishCG1State)) and self._form_state.capital_gains:
+        if (
+            isinstance(self._form_state, (IrishForm11State, IrishForm12State, IrishCG1State))
+            and self._form_state.capital_gains
+        ):
             self._add_section_items("Capital Gains", self._form_state.capital_gains)
         elif isinstance(self._form_state, (IrishForm11State, IrishCG1State)):
             self._add_section_items("Capital Gains", self._form_state.capital_gains)

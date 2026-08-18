@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from backend.chat.session_store import SessionStore
+from backend.config import AppConfig
 from backend.db_manager import DatabaseManager, LocalDb
 from src.jurisdiction.ireland.tax_form_models import (
     FormField,
@@ -40,7 +41,14 @@ def db_instance(tmp_path: Path) -> DatabaseManager:
 @pytest.fixture
 def ui_config(db_instance: DatabaseManager, tmp_path: Path) -> UIConfig:
     """Provide isolated UIConfig fixture."""
-    return UIConfig(db=db_instance, sessions_base_dir=tmp_path / ".sessions")
+    app_config = AppConfig(
+        data_dir=tmp_path,
+        db_path=tmp_path / "test_report_tab.db",
+        vector_db_path=tmp_path / "vector.db",
+        sessions_base_dir=tmp_path / ".sessions",
+    )
+    return UIConfig(db=db_instance, app_config=app_config)
+
 
 
 def test_report_tab_initial_state_empty(qapp: QApplication, ui_config: UIConfig) -> None:
@@ -250,3 +258,52 @@ def test_report_tab_metadata_year_discovery(qapp: QApplication, ui_config: UICon
     assert tab._year_combo.itemText(0) == "2022"
     assert tab._form_state is not None
     assert tab._form_state.tax_year == 2022
+
+
+def test_report_tab_delete_return_flow(qapp: QApplication, ui_config: UIConfig) -> None:
+    # Given: Report tab with 2025 and 2024 returns
+    store: SessionStore[IrishTaxFilingSession] = SessionStore(
+        sessions_dir=ui_config.tax_filing_sessions_dir,
+        session_cls=IrishTaxFilingSession,
+    )
+    s2024 = store.create_session(
+        title="Tax Return 2024",
+        form_state=IrishUndeterminedState(tax_year=2024),
+        auto_save=False,
+    )
+    s2024.id = "irish_report_2024"
+    store.save_session(s2024)
+
+    s2025 = store.create_session(
+        title="Tax Return 2025",
+        form_state=IrishUndeterminedState(tax_year=2025),
+        auto_save=False,
+    )
+    s2025.id = "irish_report_2025"
+    store.save_session(s2025)
+
+    tab = IrishTaxReportTab(config=ui_config)
+    assert tab._year_combo.currentText() == "2025"
+    assert tab._btn_delete_return.isEnabled()
+
+    # When: Deleting 2025 return with confirmation
+    with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+        tab._btn_delete_return.click()
+
+    # Then: 2025 return file is deleted and active year switches to 2024
+    assert store.load_session("irish_report_2025") is None
+    assert tab._year_combo.count() == 1
+    assert tab._year_combo.currentText() == "2024"
+    assert tab._form_state is not None
+    assert tab._form_state.tax_year == 2024
+
+    # When: Deleting the remaining 2024 return
+    with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+        tab._btn_delete_return.click()
+
+    # Then: Dropdown is empty, buttons disabled, and no active return shown
+    assert store.load_session("irish_report_2024") is None
+    assert tab._year_combo.count() == 0
+    assert not tab._btn_assess.isEnabled()
+    assert not tab._btn_delete_return.isEnabled()
+    assert "No Active Return" in tab._form_title_label.text()
