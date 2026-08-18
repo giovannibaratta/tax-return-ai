@@ -40,6 +40,7 @@ from backend.db_models import (
     FinancialRecord,
     IngestedSourceDocument,
     StagedFinancialRecord,
+    StagedTaxIncomeRecord,
     TaxDocumentMetadata,
     TaxIncomeRecord,
 )
@@ -53,6 +54,7 @@ from backend.domain_models import (
     IngestionDocumentSummary,
     IngestionStatus,
     SourceType,
+    StrictStagedTaxIncomeRecord,
     StrictTaxIncomeRecord,
     TradeRecord,
 )
@@ -154,9 +156,7 @@ class DatabaseManager:
         )
 
         @event.listens_for(self.vector_engine, "connect")
-        def load_vec_extension(
-            dbapi_connection: sqlite3.Connection, connection_record: ConnectionPoolEntry
-        ) -> None:
+        def load_vec_extension(dbapi_connection: sqlite3.Connection, connection_record: ConnectionPoolEntry) -> None:
             dbapi_connection.enable_load_extension(True)
             try:
                 sqlite_vec.load(dbapi_connection)
@@ -1435,6 +1435,237 @@ class DatabaseManager:
             statement = statement.order_by(col(TaxIncomeRecord.tax_year).desc())
             raw_records = list(session.exec(statement).all())
             return [StrictTaxIncomeRecord.from_raw(r) for r in raw_records]
+
+    def insert_staged_tax_income_record(self, record: StrictStagedTaxIncomeRecord) -> int:
+        """Insert a staged tax income record into the database.
+
+        Args:
+            record: Validated StrictStagedTaxIncomeRecord domain model instance.
+
+        Returns:
+            Assigned primary key ID.
+        """
+        raw = record.to_raw()
+        with Session(self.engine) as session:
+            session.add(raw)
+            session.commit()
+            session.refresh(raw)
+            assert raw.id is not None
+            return raw.id
+
+    def get_staged_tax_income_records(
+        self,
+        tax_year: int | None = None,
+        jurisdiction: str | None = None,
+        status: str | None = None,
+    ) -> list[StrictStagedTaxIncomeRecord]:
+        """Fetch staged tax income records matching optional filters.
+
+        Args:
+            tax_year: Optional tax year filter.
+            jurisdiction: Optional jurisdiction filter ('ireland', 'italy', etc.).
+            status: Optional verification status filter.
+
+        Returns:
+            List of validated StrictStagedTaxIncomeRecord domain instances.
+        """
+        with Session(self.engine) as session:
+            statement = select(StagedTaxIncomeRecord)
+            if tax_year is not None:
+                statement = statement.where(StagedTaxIncomeRecord.tax_year == tax_year)
+            if jurisdiction:
+                statement = statement.where(
+                    func.lower(col(StagedTaxIncomeRecord.jurisdiction)) == jurisdiction.strip().lower()
+                )
+            if status:
+                statement = statement.where(
+                    func.lower(col(StagedTaxIncomeRecord.verification_status)) == status.strip().lower()
+                )
+            statement = statement.order_by(col(StagedTaxIncomeRecord.id).desc())
+            raw_records = list(session.exec(statement).all())
+            return [StrictStagedTaxIncomeRecord.from_raw(r) for r in raw_records]
+
+    def get_staged_tax_income_record_by_id(self, record_id: int) -> StrictStagedTaxIncomeRecord | None:
+        """Fetch a single staged tax income record by ID.
+
+        Args:
+            record_id: Integer primary key ID.
+
+        Returns:
+            Validated StrictStagedTaxIncomeRecord instance or None if not found.
+        """
+        with Session(self.engine) as session:
+            raw = session.get(StagedTaxIncomeRecord, record_id)
+            if raw:
+                return StrictStagedTaxIncomeRecord.from_raw(raw)
+            return None
+
+    def update_staged_tax_income_record(self, record: StrictStagedTaxIncomeRecord) -> None:
+        """Update an existing staged tax income record in database.
+
+        Args:
+            record: StrictStagedTaxIncomeRecord instance to update.
+
+        Raises:
+            ValueError: If record ID is None or record not found in database.
+        """
+        if record.id is None:
+            raise ValueError("Cannot update staged tax income record without an ID.")
+
+        with Session(self.engine) as session:
+            existing = session.get(StagedTaxIncomeRecord, record.id)
+            if not existing:
+                raise ValueError(f"Staged tax income record #{record.id} not found.")
+
+            raw_updated = record.to_raw()
+            existing.tax_year = raw_updated.tax_year
+            existing.jurisdiction = raw_updated.jurisdiction
+            existing.income_type = raw_updated.income_type
+            existing.source_document_sha = raw_updated.source_document_sha
+            existing.source_file_name = raw_updated.source_file_name
+            existing.payload_json = raw_updated.payload_json
+            existing.voter_outputs_json = raw_updated.voter_outputs_json
+            existing.discrepancies_json = raw_updated.discrepancies_json
+            existing.verification_status = raw_updated.verification_status
+            existing.approved_tax_income_record_id = raw_updated.approved_tax_income_record_id
+            session.commit()
+
+    def approve_staged_tax_income_record(self, staged_id: int) -> int:
+        """Promote a staged tax income record into the approved tax_income_records ledger.
+
+        Args:
+            staged_id: Primary key ID of the staged record to approve.
+
+        Returns:
+            Assigned primary key ID in the approved tax_income_records table.
+
+        Raises:
+            ValueError: If staged record not found or already approved.
+        """
+        with Session(self.engine) as session:
+            staged = session.get(StagedTaxIncomeRecord, staged_id)
+            if not staged:
+                raise ValueError(f"Staged tax income record #{staged_id} not found.")
+
+            if not staged.payload_json:
+                raise ValueError(
+                    f"Staged record #{staged_id} has unresolved discrepancies and no final payload. "
+                    "Please review and resolve voter outputs in the 3-Voter Diff dialog before approving."
+                )
+
+            # Create and insert approved record
+            approved_raw = TaxIncomeRecord(
+                tax_year=staged.tax_year,
+                jurisdiction=staged.jurisdiction,
+                income_type=staged.income_type,
+                source_document_sha=staged.source_document_sha,
+                payload_json=staged.payload_json,
+                created_at=datetime.now(timezone.utc),
+            )
+
+            session.add(approved_raw)
+            session.commit()
+            session.refresh(approved_raw)
+            assert approved_raw.id is not None
+
+            # Mark staged record as approved
+            staged.verification_status = "approved"
+            staged.approved_tax_income_record_id = approved_raw.id
+            session.commit()
+
+            return approved_raw.id
+
+    def delete_staged_tax_income_record(self, record_id: int) -> bool:
+        """Delete a staged tax income record by primary key ID.
+
+        Args:
+            record_id: Integer primary key ID.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        with Session(self.engine) as session:
+            record = session.get(StagedTaxIncomeRecord, record_id)
+            if record:
+                session.delete(record)
+                session.commit()
+                return True
+            return False
+
+    def delete_all_staged_tax_income_records(self) -> int:
+        """Delete all staged tax income records from database.
+
+        Returns:
+            Count of deleted records.
+        """
+        with Session(self.engine) as session:
+            statement = select(StagedTaxIncomeRecord)
+            records = list(session.exec(statement).all())
+            count = len(records)
+            for r in records:
+                session.delete(r)
+            session.commit()
+            return count
+
+    def is_tax_income_document_ingested(self, source_document_sha: str) -> bool:
+        """Check if a tax income document SHA has already been staged or approved.
+
+        Args:
+            source_document_sha: SHA-256 string.
+
+        Returns:
+            True if present in staged_tax_income_records or tax_income_records.
+        """
+        with Session(self.engine) as session:
+            staged_stmt = select(StagedTaxIncomeRecord).where(
+                StagedTaxIncomeRecord.source_document_sha == source_document_sha
+            )
+            if session.exec(staged_stmt).first() is not None:
+                return True
+
+            approved_stmt = select(TaxIncomeRecord).where(TaxIncomeRecord.source_document_sha == source_document_sha)
+            return session.exec(approved_stmt).first() is not None
+
+    def delete_tax_income_records_by_sha(self, source_document_sha: str) -> int:
+        """Delete all staged and approved records associated with a source document SHA.
+
+        Args:
+            source_document_sha: SHA-256 string.
+
+        Returns:
+            Total count of deleted records.
+        """
+        with Session(self.engine) as session:
+            deleted_count = 0
+            staged_stmt = select(StagedTaxIncomeRecord).where(
+                StagedTaxIncomeRecord.source_document_sha == source_document_sha
+            )
+            for s in session.exec(staged_stmt).all():
+                session.delete(s)
+                deleted_count += 1
+
+            approved_stmt = select(TaxIncomeRecord).where(TaxIncomeRecord.source_document_sha == source_document_sha)
+            for a in session.exec(approved_stmt).all():
+                session.delete(a)
+                deleted_count += 1
+
+            session.commit()
+            return deleted_count
+
+    def delete_all_tax_income_records(self) -> int:
+        """Delete all approved tax income records from database.
+
+        Returns:
+            Count of deleted records.
+        """
+        with Session(self.engine) as session:
+            statement = select(TaxIncomeRecord)
+            records = list(session.exec(statement).all())
+            count = len(records)
+            for r in records:
+                session.delete(r)
+            session.commit()
+            return count
 
     def delete_tax_income_record(self, record_id: int) -> bool:
         """Delete a tax income record by primary key ID."""

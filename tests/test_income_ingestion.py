@@ -295,11 +295,22 @@ def test_income_ingestion_pipeline_success_and_escalated(test_db: DatabaseManage
     # When: ingesting with unanimous voters
     res_success = pipeline_success.ingest_irish_eds(str(dummy_pdf))
 
-    # Then: returns IngestionSuccess with persisted record
+    # Then: returns IngestionSuccess with staged record
     assert isinstance(res_success, IngestionSuccess)
     assert res_success.status == "approved"
-    assert res_success.record.tax_year == 2025
-    assert res_success.record.payload.employer_name == "Acme Corp"
+    assert res_success.staged_record.tax_year == 2025
+    assert res_success.staged_record.payload is not None
+    assert res_success.staged_record.payload.employer_name == "Acme Corp"
+    assert res_success.staged_record.verification_status == "auto_approved"
+    assert res_success.staged_record.id is not None
+
+
+    # And: record can be promoted to approved ledger
+    approved_id = test_db.approve_staged_tax_income_record(res_success.staged_record.id)
+    assert approved_id is not None
+    approved_list = test_db.get_tax_income_records(tax_year=2025)
+    assert len(approved_list) == 1
+    assert approved_list[0].id == approved_id
 
     # 2. Test IngestionEscalated
     p1 = payload_agree.model_copy(update={"gross_pay_eur": Decimal("60000.00")})
@@ -316,7 +327,9 @@ def test_income_ingestion_pipeline_success_and_escalated(test_db: DatabaseManage
     # When: ingesting with irreconcilable split voters
     res_escalated = pipeline_escalated.ingest_irish_eds(str(dummy_pdf))
 
-    # Then: returns IngestionEscalated without persisting record
+    # Then: returns IngestionEscalated with staged record marked escalated_to_user and payload=None
     assert isinstance(res_escalated, IngestionEscalated)
     assert res_escalated.status == "escalated"
+    assert res_escalated.staged_record.verification_status == "escalated_to_user"
+    assert res_escalated.staged_record.payload is None
     assert len(res_escalated.consensus_result.discrepancies) > 0

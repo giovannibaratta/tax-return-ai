@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from backend.db_manager import DatabaseManager
 from backend.domain_models import (
     IrishEmploymentDetailSummaryPayload,
-    StrictTaxIncomeRecord,
+    StrictStagedTaxIncomeRecord,
 )
 from backend.ingestion.generic_voter import GenericConsensusResult, run_multi_voter_consensus
 from backend.ingestion.helpers import calculate_sha256
@@ -34,17 +34,18 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class IngestionSuccess(BaseModel, Generic[T]):
-    """Successful income document ingestion with persisted record and approved consensus."""
+    """Successful income document ingestion with staged record and approved consensus."""
 
     status: Literal["approved"] = "approved"
-    record: StrictTaxIncomeRecord
+    staged_record: StrictStagedTaxIncomeRecord
     consensus_result: GenericConsensusResult[T]
 
 
 class IngestionEscalated(BaseModel, Generic[T]):
-    """Escalated income document ingestion requiring manual review due to voter discrepancies."""
+    """Escalated income document ingestion with staged record requiring manual review."""
 
     status: Literal["escalated"] = "escalated"
+    staged_record: StrictStagedTaxIncomeRecord
     consensus_result: GenericConsensusResult[T]
 
 
@@ -53,6 +54,7 @@ class IngestionFailed(BaseModel, Generic[T]):
 
     status: Literal["failed"] = "failed"
     error_message: str
+    staged_record: StrictStagedTaxIncomeRecord | None = None
     consensus_result: GenericConsensusResult[T] | None = None
 
 
@@ -64,7 +66,9 @@ IrishEDSIngestionResult = Annotated[
 ]
 
 IRISH_EDS_SYSTEM_PROMPT = """You are an expert Irish tax accounting extraction engine.
-Your task is to extract official employment income details from an Irish Revenue "Employment Detail Summary" (EDS / P60 replacement) document into a single JSON object.
+Your task is to extract official employment income details from an Irish Revenue
+"Employment Detail Summary" (EDS / P60 replacement) document into a single JSON object.
+
 
 Extract the following fields strictly into the JSON schema:
 - income_type: "irish_employment_detail_summary"
@@ -74,19 +78,26 @@ Extract the following fields strictly into the JSON schema:
 - employment_id: Employment sequence number/ID (or null)
 - start_date: ISO 8601 start date (YYYY-MM-DD) if available, else null
 - end_date: ISO 8601 end date (YYYY-MM-DD) if available, else null
-- gross_pay_eur: Total gross pay for the tax year in EUR (positive Decimal)
-- income_tax_paid_eur: Total Income Tax (PAYE) deducted in EUR (positive Decimal)
-- usc_paid_eur: Total Universal Social Charge (USC) deducted in EUR (positive Decimal)
-- prsi_paid_eur: Total Employee PRSI deducted in EUR (positive Decimal)
-- employer_prsi_paid_eur: Total Employer PRSI paid in EUR (positive Decimal, or null)
-- prsi_class: PRSI class letter (e.g. "A1", "A", or null)
-- prsi_weeks: Number of insurable weeks under PRSI as integer (or null)
-- lpt_deducted_eur: Local Property Tax deducted at source in EUR (positive Decimal, or null)
+- gross_pay_eur: Total "Gross pay" in EUR (positive Decimal)
+- pay_for_income_tax_eur: Total "Pay for Income Tax" in EUR (positive Decimal, or null)
+- income_tax_paid_eur: Total "Income Tax paid" (PAYE) deducted in EUR (positive Decimal)
+- taxable_benefits_eur: Total "Taxable benefits" in EUR (positive Decimal, or null)
+- pay_for_usc_eur: Total "Pay for USC" in EUR (positive Decimal, or null)
+- usc_paid_eur: Total "USC paid" (Universal Social Charge) deducted in EUR (positive Decimal)
+- lpt_deducted_eur: "LPT deducted" (Local Property Tax) in EUR (positive Decimal, or null)
+- prsi_paid_eur: "Employee PRSI paid" in EUR (positive Decimal)
+- employer_prsi_paid_eur: "Employer PRSI paid" in EUR (positive Decimal, or null)
+- prsi_classes: List of PRSI class entries [{"prsi_class": "A1", "insurable_weeks": 12}, ...]
+  from the "PRSI classes" section
+- prsi_class: Primary active PRSI class letter (e.g. "A1", or comma-separated if multiple with active weeks)
+- prsi_weeks: Total number of insurable weeks summed across active PRSI classes (or null)
+
 
 RULES:
 1. Strip currency symbols (€, EUR) and format numbers with a decimal dot (e.g. 75000.50).
-2. Do not fabricate values. Use null for missing optional fields.
-3. Return strictly valid JSON without markdown conversational text.
+2. For multiple PRSI class entries (e.g. Class M: 0 weeks, Class A1: 12 weeks), populate each entry into `prsi_classes`.
+3. Do not fabricate values. Use null for missing optional fields.
+4. Return strictly valid JSON conforming to the schema.
 """
 
 
@@ -98,7 +109,7 @@ def _get_default_ocr_parser() -> type[BasePDFParser]:
 
 
 class IncomeIngestionPipeline:
-    """Manages end-to-end ingestion and consensus verification of tax income documents."""
+    """Manages end-to-end ingestion, consensus verification, and staging of tax income documents."""
 
     def __init__(
         self,
@@ -172,11 +183,7 @@ class IncomeIngestionPipeline:
             runners=self.runners,
         )
 
-        if consensus_result.status == "escalated":
-            logger.warning("EDS consensus escalated: %s", consensus_result.discrepancies)
-            return IngestionEscalated(consensus_result=consensus_result)
-
-        if consensus_result.status == "failed" or consensus_result.reconciled_output is None:
+        if consensus_result.status == "failed":
             logger.warning("EDS consensus failed: %s", consensus_result.discrepancies)
             return IngestionFailed(
                 error_message=f"Consensus failed: {consensus_result.discrepancies}",
@@ -184,31 +191,73 @@ class IncomeIngestionPipeline:
             )
 
         # 4. De-anonymization
-        reconciled_payload = self.pii_pipeline.deanonymize_item(
-            consensus_result.reconciled_output,
-            pii_session,
-        )
+        # De-anonymize all voter outputs for staging audit trail
+        deanonymized_voters: list[IrishEmploymentDetailSummaryPayload] = []
+        for v_out in consensus_result.voter_outputs:
+            v_deanon = self.pii_pipeline.deanonymize_item(v_out, pii_session)
+            deanonymized_voters.append(v_deanon)
 
-        # 5. Persist to Database
-        strict_record = StrictTaxIncomeRecord(
-            tax_year=reconciled_payload.tax_year,
+        # De-anonymize reconciled payload if consensus reached
+        reconciled_payload: IrishEmploymentDetailSummaryPayload | None = None
+        if consensus_result.reconciled_output is not None:
+            reconciled_payload = self.pii_pipeline.deanonymize_item(
+                consensus_result.reconciled_output,
+                pii_session,
+            )
+            tax_year = reconciled_payload.tax_year
+            income_type = reconciled_payload.income_type
+        elif deanonymized_voters:
+            tax_year = deanonymized_voters[0].tax_year
+            income_type = deanonymized_voters[0].income_type
+        else:
+            return IngestionFailed(
+                error_message="No voter outputs available to construct staged record.",
+                consensus_result=consensus_result,
+            )
+
+        # 5. Determine Verification Status
+        if consensus_result.status == "approved":
+            if len(consensus_result.discrepancies) == 0:
+                verification_status = "auto_approved"
+            else:
+                verification_status = "majority_agreed"
+        else:
+            verification_status = "escalated_to_user"
+
+        # 6. Persist to Staging Database Table
+        strict_staged = StrictStagedTaxIncomeRecord(
+            tax_year=tax_year,
             jurisdiction="ireland",
-            income_type=reconciled_payload.income_type,
+            income_type=income_type,
             source_document_sha=doc_sha,
+            source_file_name=doc_name,
             payload=reconciled_payload,
+            voter_outputs=deanonymized_voters,
+            discrepancies=consensus_result.discrepancies if consensus_result.discrepancies else None,
+            verification_status=verification_status,
             created_at=datetime.now(timezone.utc),
         )
 
-        record_id = self.db.insert_tax_income_record(strict_record)
-        persisted_record = strict_record.model_copy(update={"id": record_id})
+        staged_id = self.db.insert_staged_tax_income_record(strict_staged)
+        persisted_staged = strict_staged.model_copy(update={"id": staged_id})
+
+        emp_name = reconciled_payload.employer_name if reconciled_payload else "Unresolved"
         logger.info(
-            "Successfully persisted tax income record #%d for year %d (%s).",
-            record_id,
-            reconciled_payload.tax_year,
-            reconciled_payload.employer_name,
+            "Successfully staged tax income record #%d for year %d (%s) with status '%s'.",
+            staged_id,
+            tax_year,
+            emp_name,
+            verification_status,
         )
 
+
+        if consensus_result.status == "escalated":
+            return IngestionEscalated(
+                staged_record=persisted_staged,
+                consensus_result=consensus_result,
+            )
+
         return IngestionSuccess(
-            record=persisted_record,
+            staged_record=persisted_staged,
             consensus_result=consensus_result,
         )

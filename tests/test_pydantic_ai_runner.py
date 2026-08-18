@@ -38,3 +38,18 @@ def test_pydantic_ai_runner_complete_structured() -> None:
     assert isinstance(result, SampleExtractionSchema)
     assert result.name == "Alpha Corp"
     assert result.amount == Decimal("1250.50")
+
+
+def test_pydantic_ai_runner_complete_structured_fallback() -> None:
+    # Given: A model that returns text JSON formatted in markdown
+    json_text = '```json\n{"name": "Beta Corp", "amount": "2500.00"}\n```'
+    model = TestModel(custom_output_text=json_text)
+    runner = PydanticAIRunner(model=model)
+
+    # When: Calling fallback directly or via complete_structured
+    result = runner._complete_structured_fallback("Extract entity", schema_cls=SampleExtractionSchema)
+
+    # Then: Validates into Pydantic model successfully
+    assert isinstance(result, SampleExtractionSchema)
+    assert result.name == "Beta Corp"
+    assert result.amount == Decimal("2500.00")

@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, TypeAdapter, field_validator, model_validator
 from pydantic import Field as PydanticField
 
-from backend.db_models import FinancialRecord, TaxIncomeRecord
+from backend.db_models import FinancialRecord, StagedTaxIncomeRecord, TaxIncomeRecord
 
 
 class PostconditionError(ValueError):
@@ -485,6 +485,13 @@ StrictFinancialRecord = Annotated[
 ]
 
 
+class IrishPRSIClassEntry(BaseModel):
+    """Single PRSI class contribution breakdown from an Irish Revenue EDS."""
+
+    prsi_class: str
+    insurable_weeks: int
+
+
 class IrishEmploymentDetailSummaryPayload(BaseModel):
     """Payload representing an Irish Revenue Employment Detail Summary (EDS / P60)."""
 
@@ -495,14 +502,24 @@ class IrishEmploymentDetailSummaryPayload(BaseModel):
     employment_id: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
+
+    # Pay & Tax figures
     gross_pay_eur: Decimal
+    pay_for_income_tax_eur: Decimal | None = None
     income_tax_paid_eur: Decimal
+    taxable_benefits_eur: Decimal | None = None
+    pay_for_usc_eur: Decimal | None = None
     usc_paid_eur: Decimal
+    lpt_deducted_eur: Decimal | None = None
+
+    # PRSI figures
     prsi_paid_eur: Decimal
     employer_prsi_paid_eur: Decimal | None = None
+
+    # PRSI classes breakdown & summary fields
+    prsi_classes: list[IrishPRSIClassEntry] = PydanticField(default_factory=list)
     prsi_class: str | None = None
     prsi_weeks: int | None = None
-    lpt_deducted_eur: Decimal | None = None
 
 
 IncomePayload = Annotated[
@@ -549,3 +566,74 @@ class StrictTaxIncomeRecord(BaseModel):
             created_at=self.created_at,
         )
 
+
+class StrictStagedTaxIncomeRecord(BaseModel):
+    """Domain model for a staged tax income record with strongly typed payloads."""
+
+    id: int | None = None
+    tax_year: int
+    jurisdiction: str
+    income_type: str
+    source_document_sha: str | None = None
+    source_file_name: str | None = None
+    payload: IncomePayload | None = None
+    voter_outputs: list[IncomePayload] | None = None
+    discrepancies: list[str] | None = None
+    verification_status: str = "pending_approval"
+    approved_tax_income_record_id: int | None = None
+    created_at: datetime
+
+    @classmethod
+    def from_raw(cls, raw: StagedTaxIncomeRecord) -> "StrictStagedTaxIncomeRecord":
+        """Convert from raw database SQLModel entity."""
+        payload_adapter: TypeAdapter[IncomePayload] = TypeAdapter(IncomePayload)
+        voters_adapter: TypeAdapter[list[IncomePayload]] = TypeAdapter(list[IncomePayload])
+        disc_adapter: TypeAdapter[list[str]] = TypeAdapter(list[str])
+
+        payload_obj: IncomePayload | None = (
+            payload_adapter.validate_json(raw.payload_json) if raw.payload_json else None
+        )
+        voter_outputs = voters_adapter.validate_json(raw.voter_outputs_json) if raw.voter_outputs_json else None
+        discrepancies = disc_adapter.validate_json(raw.discrepancies_json) if raw.discrepancies_json else None
+
+        return cls(
+            id=raw.id,
+            tax_year=raw.tax_year,
+            jurisdiction=raw.jurisdiction,
+            income_type=raw.income_type,
+            source_document_sha=raw.source_document_sha,
+            source_file_name=raw.source_file_name,
+            payload=payload_obj,
+            voter_outputs=voter_outputs,
+            discrepancies=discrepancies,
+            verification_status=raw.verification_status,
+            approved_tax_income_record_id=raw.approved_tax_income_record_id,
+            created_at=raw.created_at,
+        )
+
+    def to_raw(self) -> StagedTaxIncomeRecord:
+        """Convert domain model to raw SQLModel entity."""
+        voters_adapter: TypeAdapter[list[IncomePayload]] = TypeAdapter(list[IncomePayload])
+        disc_adapter: TypeAdapter[list[str]] = TypeAdapter(list[str])
+
+        voters_json = (
+            voters_adapter.dump_json(self.voter_outputs).decode("utf-8") if self.voter_outputs is not None else None
+        )
+        disc_json = (
+            disc_adapter.dump_json(self.discrepancies).decode("utf-8") if self.discrepancies is not None else None
+        )
+
+        return StagedTaxIncomeRecord(
+            id=self.id,
+            tax_year=self.tax_year,
+            jurisdiction=self.jurisdiction,
+            income_type=self.income_type,
+            source_document_sha=self.source_document_sha,
+            source_file_name=self.source_file_name,
+            payload_json=self.payload.model_dump_json() if self.payload is not None else None,
+            voter_outputs_json=voters_json,
+            discrepancies_json=disc_json,
+            verification_status=self.verification_status,
+            approved_tax_income_record_id=self.approved_tax_income_record_id,
+            created_at=self.created_at,
+        )

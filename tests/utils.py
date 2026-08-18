@@ -36,6 +36,8 @@ class DummyMockPydanticRunner(PydanticAIRunner):
         prompt: str,
         schema_cls: type[T],
         system_instruction: str = "",
+        *,
+        fallback_to_json: bool = False,
     ) -> T:
         if isinstance(self._output_obj, str):
             return schema_cls.model_validate_json(self._output_obj)

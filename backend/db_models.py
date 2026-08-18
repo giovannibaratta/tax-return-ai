@@ -177,3 +177,22 @@ class TaxIncomeRecord(SQLModel, table=True):
     payload_json: str = Field(...)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class StagedTaxIncomeRecord(SQLModel, table=True):
+    """Staging table for extracted tax income records awaiting voter consensus approval or user review."""
+
+    __tablename__ = "staged_tax_income_records"  # type: ignore
+
+    id: int | None = Field(default=None, primary_key=True)
+    tax_year: int = Field(..., index=True)
+    jurisdiction: str = Field(..., index=True)
+    income_type: str = Field(...)
+    source_document_sha: str | None = Field(default=None, nullable=True)
+    source_file_name: str | None = Field(default=None, nullable=True)
+    payload_json: str | None = Field(default=None, nullable=True)
+    voter_outputs_json: str | None = Field(default=None, nullable=True)
+
+    discrepancies_json: str | None = Field(default=None, nullable=True)
+    verification_status: str = Field(default="pending_approval")
+    approved_tax_income_record_id: int | None = Field(default=None, nullable=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

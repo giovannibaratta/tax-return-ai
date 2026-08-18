@@ -45,6 +45,7 @@ from src.ui.base_tab import BaseAppTab
 from src.ui.chat_tab import ChatTab
 from src.ui.classification_tab import AssetClassificationTab
 from src.ui.config import UIConfig
+from src.ui.income_tab import IncomeRecordsTab
 from src.ui.profile_tab import TaxpayerProfileTab
 from src.ui.records_tab import FinancialRecordsTab
 from src.ui.report_tab import IrishTaxReportTab
@@ -531,6 +532,7 @@ class MainWindow(QMainWindow):
             IrishTaxReportTab(config=self._config),
             ChatTab(db=self._config.db),
             FinancialRecordsTab(db=self._config.db),
+            IncomeRecordsTab(db=self._config.db),
             TaxpayerProfileTab(db=self._config.db),
             AssetClassificationTab(config=self._config),
         ]
@@ -539,9 +541,11 @@ class MainWindow(QMainWindow):
             "Irish Tax Report",
             "Chat",
             "Financial Records",
+            "Income Records",
             "Taxpayer Profile",
             "Asset Classification",
         ]
+
         for tab, name in zip(self._tab_instances, tab_names):
             self._tabs.addTab(tab, name)
 

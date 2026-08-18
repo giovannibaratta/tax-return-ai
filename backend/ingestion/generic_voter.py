@@ -176,7 +176,9 @@ def run_multi_voter_consensus(
                     prompt=prompt,
                     schema_cls=schema_cls,
                     system_instruction=system_prompt,
+                    fallback_to_json=True,
                 )
+
                 break
             except Exception as exc:
                 last_error = str(exc)
@@ -203,5 +205,3 @@ def run_multi_voter_consensus(
         voter_outputs=voter_outputs,
         discrepancies=discrepancies,
     )
-
-

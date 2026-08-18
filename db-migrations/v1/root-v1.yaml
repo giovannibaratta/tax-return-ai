@@ -30,4 +30,7 @@ databaseChangeLog:
       file: db-migrations/v1/0014-add-source-type-and-confidence.yaml
   - include:
       file: db-migrations/v1/0015-create-tax-income-records.yaml
+  - include:
+      file: db-migrations/v1/0016-create-staged-tax-income-records.yaml
+
 
