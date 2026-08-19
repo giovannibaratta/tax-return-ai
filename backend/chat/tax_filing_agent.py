@@ -19,6 +19,7 @@ from src.jurisdiction.ireland.orchestrator import compute_disposal
 from src.jurisdiction.ireland.tax_form_models import (
     FieldStatus,
     FieldValueType,
+    FilingFormType,
     FilingObligationDecision,
     FormField,
     IrishCG1State,
@@ -27,6 +28,9 @@ from src.jurisdiction.ireland.tax_form_models import (
     IrishTaxFormState,
     IrishUndeterminedState,
     TaxFormSection,
+    normalize_field_status,
+    normalize_form_section,
+    normalize_form_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -424,6 +428,19 @@ Never conceal uncertainty.
 The goal is not to fill every form field.
 
 The goal is to produce a complete, evidence-backed, tax-year-correct and auditable tax filing, while clearly identifying anything that requires additional information or review.
+
+==================================================
+16. TOOL CONVENTIONS & SCHEMAS
+==================================================
+
+When calling tools, always adhere strictly to the expected literal identifiers:
+- `set_filing_form`:
+  - `form_type`: Must be strictly one of `"form11"`, `"form12"`, or `"cg1"`. Do not pass full titles or extra text.
+- `update_form_field`:
+  - `section`: Must be strictly one of `"capital_gains"`, `"income"`, `"tax_credits"`, or `"additional_fields"`.
+  - `method`: Must be strictly one of `"computed_via_tool"`, `"computed_via_rag"`, or `"user_override"`.
+- `clear_form_field`:
+  - `section`: Must be strictly one of `"capital_gains"`, `"income"`, `"tax_credits"`, or `"additional_fields"`.
 """
 
 
@@ -448,26 +465,29 @@ def _apply_form_field_update(  # noqa: PLR0917
     Returns:
         Tuple of (success_boolean, status_message).
     """
-    if isinstance(form, IrishUndeterminedState) and section != "additional_fields":
+    canonical_section = normalize_form_section(section)
+    canonical_method = normalize_field_status(method)
+
+    if isinstance(form, IrishUndeterminedState) and canonical_section != "additional_fields":
         return (
             False,
             "Error: Filing obligation is currently undetermined. "
             "Use 'set_filing_form' first to select 'form11', 'form12' or 'cg1' before adding section fields.",
         )
-    if isinstance(form, IrishCG1State) and section in ("income", "tax_credits"):
+    if isinstance(form, IrishCG1State) and canonical_section in ("income", "tax_credits"):
         return (
             False,
-            f"Error: Form CG1 is for Capital Gains Tax only and does not contain a '{section}' section. "
+            f"Error: Form CG1 is for Capital Gains Tax only and does not contain a '{canonical_section}' section. "
             "Use 'set_filing_form' to switch form if Income Tax reporting is required.",
         )
 
-    if section == "capital_gains" and isinstance(form, (IrishForm11State, IrishForm12State, IrishCG1State)):
+    if canonical_section == "capital_gains" and isinstance(form, (IrishForm11State, IrishForm12State, IrishCG1State)):
         target_dict = form.capital_gains
-    elif section == "income" and isinstance(form, (IrishForm11State, IrishForm12State)):
+    elif canonical_section == "income" and isinstance(form, (IrishForm11State, IrishForm12State)):
         target_dict = form.income
-    elif section == "tax_credits" and isinstance(form, IrishForm12State):
+    elif canonical_section == "tax_credits" and isinstance(form, IrishForm12State):
         target_dict = form.tax_credits
-    elif section == "additional_fields":
+    elif canonical_section == "additional_fields":
         target_dict = form.additional_fields
     else:
         return False, f"Error: Invalid section '{section}' for form {form.form_type}."
@@ -478,10 +498,10 @@ def _apply_form_field_update(  # noqa: PLR0917
     target_dict[field_name] = FormField(
         name=field_name,
         value=value,
-        status=method,
+        status=canonical_method,
         rationale=rationale,
     )
-    return True, f"Successfully updated {section}.{field_name} = {value}"
+    return True, f"Successfully updated {canonical_section}.{field_name} = {value}"
 
 
 def _apply_form_field_clear(
@@ -499,18 +519,20 @@ def _apply_form_field_clear(
     Returns:
         Tuple of (success_boolean, status_message).
     """
-    if isinstance(form, IrishUndeterminedState) and section != "additional_fields":
+    canonical_section = normalize_form_section(section)
+
+    if isinstance(form, IrishUndeterminedState) and canonical_section != "additional_fields":
         return False, f"Section '{section}' is not present on undetermined form state."
-    if isinstance(form, IrishCG1State) and section in ("income", "tax_credits"):
+    if isinstance(form, IrishCG1State) and canonical_section in ("income", "tax_credits"):
         return False, f"Form CG1 does not contain a '{section}' section."
 
-    if section == "capital_gains" and isinstance(form, (IrishForm11State, IrishForm12State, IrishCG1State)):
+    if canonical_section == "capital_gains" and isinstance(form, (IrishForm11State, IrishForm12State, IrishCG1State)):
         target_dict = form.capital_gains
-    elif section == "income" and isinstance(form, (IrishForm11State, IrishForm12State)):
+    elif canonical_section == "income" and isinstance(form, (IrishForm11State, IrishForm12State)):
         target_dict = form.income
-    elif section == "tax_credits" and isinstance(form, IrishForm12State):
+    elif canonical_section == "tax_credits" and isinstance(form, IrishForm12State):
         target_dict = form.tax_credits
-    elif section == "additional_fields":
+    elif canonical_section == "additional_fields":
         target_dict = form.additional_fields
     else:
         return False, f"Invalid section '{section}'."
@@ -522,12 +544,12 @@ def _apply_form_field_clear(
         return False, f"Field '{field_name}' is locked (user_override) and cannot be cleared by agent."
 
     del target_dict[field_name]
-    return True, f"Successfully cleared {section}.{field_name}"
+    return True, f"Successfully cleared {canonical_section}.{field_name}"
 
 
 def _apply_form_type_switch(
     current_form: IrishTaxFormState,
-    form_type: Literal["form11", "form12", "cg1"],
+    form_type: FilingFormType,
     rationale: str,
     is_chargeable_person: bool | None,
     has_cgt_obligation: bool | None,
@@ -544,8 +566,9 @@ def _apply_form_type_switch(
     Returns:
         New or updated IrishTaxFormState instance.
     """
+    canonical_form_type = normalize_form_type(form_type)
     decision = FilingObligationDecision(
-        required_form=form_type,
+        required_form=canonical_form_type,
         is_chargeable_person=is_chargeable_person,
         has_cgt_obligation=has_cgt_obligation,
         rationale=rationale,
@@ -559,14 +582,14 @@ def _apply_form_type_switch(
     tax_credits = current_form.tax_credits if isinstance(current_form, IrishForm12State) else {}
     additional_fields = current_form.additional_fields
 
-    if form_type == "cg1":
+    if canonical_form_type == "cg1":
         return IrishCG1State(
             tax_year=current_form.tax_year,
             obligation_decision=decision,
             capital_gains=capital_gains,
             additional_fields=additional_fields,
         )
-    if form_type == "form12":
+    if canonical_form_type == "form12":
         return IrishForm12State(
             tax_year=current_form.tax_year,
             obligation_decision=decision,
@@ -604,7 +627,7 @@ async def get_form_state(ctx: RunContext[TaxFilingDeps]) -> str:
 )
 async def set_filing_form(
     ctx: RunContext[TaxFilingDeps],
-    form_type: Literal["form11", "form12", "cg1"],
+    form_type: FilingFormType,
     rationale: str,
     is_chargeable_person: bool | None = None,
     has_cgt_obligation: bool | None = None,
@@ -613,19 +636,23 @@ async def set_filing_form(
 
     Args:
         ctx: RunContext containing tax filing dependencies.
-        form_type: 'form11' (Self-Assessment), 'form12' (PAYE Return), or 'cg1' (Capital Gains Tax only).
+        form_type: Exact literal string: 'form11', 'form12', or 'cg1'.
         rationale: Explanation of why this form is required, citing Revenue rules and taxpayer facts.
         is_chargeable_person: Optional boolean indicating if taxpayer is a chargeable person.
         has_cgt_obligation: Optional boolean indicating if taxpayer has CGT reporting obligations.
     """
+    canonical_form_type = normalize_form_type(form_type)
+    effective_form_type: Literal["form11", "form12", "cg1"] = (
+        "form11" if canonical_form_type == "undetermined" else canonical_form_type
+    )
     ctx.deps.form_state = _apply_form_type_switch(
         current_form=ctx.deps.form_state,
-        form_type=form_type,
+        form_type=effective_form_type,
         rationale=rationale,
         is_chargeable_person=is_chargeable_person,
         has_cgt_obligation=has_cgt_obligation,
     )
-    return f"Successfully set tax filing form to {form_type.upper()}."
+    return f"Successfully set tax filing form to {effective_form_type.upper()}."
 
 
 @trace_tool(
@@ -638,17 +665,17 @@ async def update_form_field(
     field_name: str,
     value: FieldValueType,
     rationale: str,
-    method: Literal["computed_via_tool", "computed_via_rag"],
+    method: FieldStatus,
 ) -> str:
     """Update a field on the tax form.
 
     Args:
         ctx: RunContext containing tax filing dependencies.
-        section: 'capital_gains', 'income' (Form 11 only), or 'additional_fields'.
+        section: Exact literal string: 'capital_gains', 'income', 'tax_credits', or 'additional_fields'.
         field_name: Internal identifier for the field (e.g. 'PAYE_Income', 'Chargeable_Gain').
         value: Computed or entered value (e.g. string, number, or boolean).
         rationale: Explanation for this value. If computed via RAG or calculate, include expressions and data.
-        method: 'computed_via_tool' or 'computed_via_rag'.
+        method: Exact literal string: 'computed_via_tool', 'computed_via_rag', or 'user_override'.
     """
     _, message = _apply_form_field_update(
         form=ctx.deps.form_state,
@@ -674,7 +701,7 @@ async def clear_form_field(
 
     Args:
         ctx: RunContext containing tax filing dependencies.
-        section: 'capital_gains', 'income', or 'additional_fields'.
+        section: Exact literal string: 'capital_gains', 'income', 'tax_credits', or 'additional_fields'.
         field_name: Internal identifier for the field to remove.
     """
     _, message = _apply_form_field_clear(
@@ -749,12 +776,12 @@ def _register_tax_filing_tools(agent: Agent[TaxFilingDeps, str]) -> None:
         agent: Target PydanticAI agent instance.
     """
     register_tax_tools(agent)
-    _ = agent.tool(get_form_state)
-    _ = agent.tool(set_filing_form)
-    _ = agent.tool(update_form_field)
-    _ = agent.tool(clear_form_field)
-    _ = agent.tool(run_cgt_computation)
-    _ = agent.tool(run_pension_calculator)
+    agent.tool(retries=2)(get_form_state)
+    agent.tool(retries=2)(set_filing_form)
+    agent.tool(retries=2)(update_form_field)
+    agent.tool(retries=2)(clear_form_field)
+    agent.tool(retries=2)(run_cgt_computation)
+    agent.tool(retries=2)(run_pension_calculator)
 
 
 def create_tax_filing_agent() -> Agent[TaxFilingDeps, str]:
@@ -766,6 +793,7 @@ def create_tax_filing_agent() -> Agent[TaxFilingDeps, str]:
         deps_type=TaxFilingDeps,
         output_type=str,
         system_prompt=TAX_FILING_SYSTEM_PROMPT,
+        retries=2,
     )
     _register_tax_filing_tools(agent)
     return agent

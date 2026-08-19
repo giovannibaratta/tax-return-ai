@@ -16,8 +16,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal, ParamSpec, TypeVar, cast
+from typing import Annotated, Any, Literal, ParamSpec, TypeVar, cast
 
+from pydantic import BeforeValidator
 from pydantic_ai import Agent, RunContext
 
 from backend.deliberation.models import EvidenceChunk
@@ -124,16 +125,16 @@ def register_tax_tools(*agents: Agent[DepsT, ResultT]) -> None:
         *agents: One or more PydanticAI Agent instances whose dependencies provide ``SharedAgentDeps``.
     """
     for agent in agents:
-        _ = agent.tool(get_taxpayer_profile)
-        _ = agent.tool(query_tax_knowledge)
-        _ = agent.tool(list_documents)
-        _ = agent.tool(get_chunk)
-        _ = agent.tool(get_chunk_neighbors)
-        _ = agent.tool(read_doc_page)
-        _ = agent.tool(calculate)
-        _ = agent.tool(get_financial_record)
-        _ = agent.tool(filter_financial_records)
-        _ = agent.tool(get_tax_income_records)
+        agent.tool(retries=2)(get_taxpayer_profile)
+        agent.tool(retries=2)(query_tax_knowledge)
+        agent.tool(retries=2)(list_documents)
+        agent.tool(retries=2)(get_chunk)
+        agent.tool(retries=2)(get_chunk_neighbors)
+        agent.tool(retries=2)(read_doc_page)
+        agent.tool(retries=2)(calculate)
+        agent.tool(retries=2)(get_financial_record)
+        agent.tool(retries=2)(filter_financial_records)
+        agent.tool(retries=2)(get_tax_income_records)
 
 
 @trace_tool(
@@ -331,6 +332,38 @@ async def get_financial_record(ctx: RunContext[SharedAgentDeps], record_id: int)
     return get_financial_record_action(db=ctx.deps.db, record_id=record_id)
 
 
+def _normalize_filter_logic(v: object) -> str:
+    """Normalize filter logic string to uppercase AND/OR."""
+    if isinstance(v, str):
+        return v.strip().upper()
+    return str(v)
+
+
+def _normalize_filter_asset_type(v: object) -> object:
+    """Normalize asset type filter string to lowercase."""
+    if isinstance(v, str):
+        return v.strip().lower()
+    return v
+
+
+def _normalize_filter_action(v: object) -> object:
+    """Normalize transaction action filter string to lowercase."""
+    if isinstance(v, str):
+        return v.strip().lower()
+    return v
+
+
+FilterLogic = Annotated[Literal["AND", "OR"], BeforeValidator(_normalize_filter_logic)]
+FilterAssetType = Annotated[
+    Literal["stock", "etf", "cash", "tax_payment", "salary", "pension"] | None,
+    BeforeValidator(_normalize_filter_asset_type),
+]
+FilterAction = Annotated[
+    Literal["buy", "sell", "dividend", "tax_payment", "salary_payout", "corporate_action"] | None,
+    BeforeValidator(_normalize_filter_action),
+]
+
+
 @trace_tool(
     tool_name="filter_financial_records",
     summary_fn=lambda res: f"Found {len(res)} matching financial records",
@@ -343,15 +376,15 @@ async def get_financial_record(ctx: RunContext[SharedAgentDeps], record_id: int)
 )
 async def filter_financial_records(  # noqa: PLR0917
     ctx: RunContext[SharedAgentDeps],
-    asset_type: Literal["stock", "etf", "cash", "tax_payment", "salary", "pension"] | None = None,
-    action: Literal["buy", "sell", "dividend", "tax_payment", "salary_payout", "corporate_action"] | None = None,
+    asset_type: FilterAssetType = None,
+    action: FilterAction = None,
     tax_year: int | None = None,
     isin: str | None = None,
     quantity_over: Decimal | None = None,
     quantity_less: Decimal | None = None,
     purchase_date_start: datetime | None = None,
     purchase_date_end: datetime | None = None,
-    logic: Literal["AND", "OR"] = "AND",
+    logic: FilterLogic = "AND",
     account_country: str | None = None,
     limit: int = 100,
 ) -> list[BaseStrictRecord]:

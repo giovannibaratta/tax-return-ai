@@ -3,13 +3,92 @@
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, Field
+from pydantic import BaseModel, BeforeValidator, Discriminator, Field
 
 from backend.chat.models import ChatSession
 
+
+def normalize_form_type(v: object) -> Literal["undetermined", "form11", "form12", "cg1"]:
+    """Normalize user or LLM representation of Irish tax forms to canonical identifier.
+
+    Accepts exact form identifiers and standard naming variations (e.g. 'Form 11' -> 'form11',
+    'Form 12' -> 'form12', 'Form CG1' / 'CG1' -> 'cg1', 'undetermined' -> 'undetermined').
+    """
+    if not isinstance(v, str):
+        return "undetermined"
+    cleaned = v.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    if cleaned == "form11":
+        return "form11"
+    if cleaned == "form12":
+        return "form12"
+    if cleaned in ("cg1", "formcg1"):
+        return "cg1"
+    if cleaned in ("undetermined", "none", "unknown"):
+        return "undetermined"
+    raise ValueError(
+        f"Invalid tax form type '{v}'. Allowed values are 'form11' (Form 11), 'form12' (Form 12), or 'cg1' (Form CG1)."
+    )
+
+
+def normalize_form_section(v: object) -> Literal["capital_gains", "income", "tax_credits", "additional_fields"]:
+    """Normalize user or LLM representation of tax form section to canonical identifier.
+
+    Accepts exact section names with standard whitespace and case normalization.
+    """
+    if not isinstance(v, str):
+        raise ValueError(f"Invalid tax form section '{v}'. Must be a string.")
+    cleaned = v.strip().lower().replace(" ", "_").replace("-", "_")
+    if cleaned == "capital_gains":
+        return "capital_gains"
+    if cleaned == "income":
+        return "income"
+    if cleaned == "tax_credits":
+        return "tax_credits"
+    if cleaned == "additional_fields":
+        return "additional_fields"
+    raise ValueError(
+        f"Invalid tax form section '{v}'. Expected 'capital_gains', 'income', 'tax_credits', or 'additional_fields'."
+    )
+
+
+def normalize_field_status(v: object) -> Literal["computed_via_tool", "computed_via_rag", "user_override"]:
+    """Normalize field computation method/status to canonical identifier.
+
+    Accepts exact method names with standard whitespace and case normalization.
+    """
+    if not isinstance(v, str):
+        raise ValueError(f"Invalid field status '{v}'. Must be a string.")
+    cleaned = v.strip().lower().replace(" ", "_").replace("-", "_")
+    if cleaned in ("computed_via_tool", "tool"):
+        return "computed_via_tool"
+    if cleaned in ("computed_via_rag", "rag"):
+        return "computed_via_rag"
+    if cleaned in ("user_override", "override"):
+        return "user_override"
+    raise ValueError(
+        f"Invalid field status '{v}'. Expected 'computed_via_tool', 'computed_via_rag', or 'user_override'."
+    )
+
+
+FilingFormType = Annotated[
+    Literal["form11", "form12", "cg1"],
+    BeforeValidator(normalize_form_type),
+]
+
+ObligationFormType = Annotated[
+    Literal["undetermined", "form11", "form12", "cg1"],
+    BeforeValidator(normalize_form_type),
+]
+
 FieldValueType = str | bool | Decimal
-FieldStatus = Literal["computed_via_tool", "computed_via_rag", "user_override"]
-TaxFormSection = Literal["capital_gains", "income", "tax_credits", "additional_fields"]
+FieldStatus = Annotated[
+    Literal["computed_via_tool", "computed_via_rag", "user_override"],
+    BeforeValidator(normalize_field_status),
+]
+TaxFormSection = Annotated[
+    Literal["capital_gains", "income", "tax_credits", "additional_fields"],
+    BeforeValidator(normalize_form_section),
+]
 
 
 class FormField(BaseModel):
@@ -29,7 +108,7 @@ class FormField(BaseModel):
 class FilingObligationDecision(BaseModel):
     """Assessment of the taxpayer's filing obligations for the target tax year."""
 
-    required_form: Literal["undetermined", "form11", "form12", "cg1"] = Field(
+    required_form: ObligationFormType = Field(
         default="undetermined",
         description="Determined filing form (Form 11 for self-assessment, Form 12 for PAYE returns, Form CG1 for CGT-only).",
     )

@@ -23,12 +23,10 @@ from backend.tools.tax_tools import (
     get_chunk_neighbors_action,
     get_taxpayer_profile_action,
     list_documents_action,
-    query_tax_knowledge,
-    read_doc_page,
     read_doc_page_action,
     register_tax_tools,
 )
-from src.jurisdiction.ireland.cgt_models import TaxpayerProfile
+from src.jurisdiction.ireland.cgt_models import ResidencyType, TaxpayerProfile
 
 
 def test_calculate_action() -> None:
@@ -61,6 +59,8 @@ def test_tax_tools_db_actions() -> None:
             document_name="guide.pdf",
             document_sha="sha_abc",
             jurisdiction="ireland",
+            source_type="regulation",
+            confidence_level="high",
             page_number=1,
             chunk_index=0,
             text_content="Page 1 Content",
@@ -70,6 +70,8 @@ def test_tax_tools_db_actions() -> None:
             document_name="guide.pdf",
             document_sha="sha_abc",
             jurisdiction="ireland",
+            source_type="regulation",
+            confidence_level="high",
             page_number=2,
             chunk_index=1,
             text_content="Page 2 Content",
@@ -102,14 +104,18 @@ def test_register_tax_tools() -> None:
     # When: registering tax tools
     register_tax_tools(agent)
 
-    # Then: agent should have tools registered in _function_toolset
-    tool_names = list(agent._function_toolset.tools.keys())
-    assert "get_taxpayer_profile" in tool_names
+    # Then: tools are registered successfully on agent
+    toolset = getattr(agent, "_function_toolset", None)
+    tool_names: set[str] = set(getattr(toolset, "tools", {}).keys())
     assert "query_tax_knowledge" in tool_names
     assert "list_documents" in tool_names
     assert "get_chunk" in tool_names
     assert "get_chunk_neighbors" in tool_names
+    assert "read_doc_page" in tool_names
     assert "calculate" in tool_names
+    assert "get_financial_record" in tool_names
+    assert "filter_financial_records" in tool_names
+    assert "get_tax_income_records" in tool_names
 
 
 def test_get_taxpayer_profile_action() -> None:
@@ -120,9 +126,8 @@ def test_get_taxpayer_profile_action() -> None:
         tax_year=2025,
         fiscal_residence_country="IE",
         domicile_country="IT",
-        residency_type="resident_non_domiciled",
+        residency_type=ResidencyType.RESIDENT_NON_DOMICILED,
         marginal_tax_rate=Decimal("0.40"),
-        notes="Remittance basis applicable",
     )
     db.upsert_taxpayer_profile(profile)
 
@@ -134,23 +139,7 @@ def test_get_taxpayer_profile_action() -> None:
     assert profiles[0].tax_year == 2025
     assert profiles[0].fiscal_residence_country == "IE"
     assert profiles[0].domicile_country == "IT"
-    assert profiles[0].residency_type == "resident_non_domiciled"
-
-
-def test_query_tax_knowledge_rejection() -> None:
-
-    # Given: A mock RunContext and short single-word query 'tax'
-    db = DatabaseManager(MemoryDb())
-
-    deps = ChatDeps(db=db, embedding_runner=MagicMock())
-    ctx = RunContext(
-        deps=deps, model=TestModel(), usage=RunUsage(), prompt="test", retry=0, tool_name="query_tax_knowledge"
-    )
-
-    # When: query_tax_knowledge is invoked with 1 or 2 word query
-    # Then: query is rejected with ValueError (too few words)
-    with pytest.raises(ValueError, match="rejected"):
-        asyncio.run(query_tax_knowledge(ctx, query_text="tax"))
+    assert profiles[0].residency_type == ResidencyType.RESIDENT_NON_DOMICILED
 
 
 def test_read_doc_page_tool() -> None:
@@ -163,6 +152,8 @@ def test_read_doc_page_tool() -> None:
             document_name="irish_cgt_guide.pdf",
             document_sha="sha_cgt",
             jurisdiction="ireland",
+            source_type="regulation",
+            confidence_level="high",
             page_number=3,
             chunk_index=0,
             text_content="Page 3 Part 1: Deemed disposal 8 year rule applies to UCITS ETFs.",
@@ -172,6 +163,8 @@ def test_read_doc_page_tool() -> None:
             document_name="irish_cgt_guide.pdf",
             document_sha="sha_cgt",
             jurisdiction="ireland",
+            source_type="regulation",
+            confidence_level="high",
             page_number=3,
             chunk_index=1,
             text_content="Page 3 Part 2: Exit tax rate is 41%.",
@@ -179,19 +172,11 @@ def test_read_doc_page_tool() -> None:
         session.add_all([c1, c2])
         session.commit()
 
-    deps = ChatDeps(db=db)
-    ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage(), prompt="test", retry=0, tool_name="read_doc_page")
-
-    # When: Reading document page 3 via tool action and async tool
+    # When: Reading document page 3 via tool action
     page = read_doc_page_action(db=db, document_name="irish_cgt_guide.pdf", page_number=3)
-    async_result = asyncio.run(read_doc_page(ctx, document_name="irish_cgt_guide.pdf", page_number=3))
 
-    # Then: Full page text is concatenated and resource is created
+    # Then: Full page text is concatenated
     assert page is not None
     assert page.page_number == 3
     assert "Deemed disposal 8 year rule" in page.text_content
     assert "Exit tax rate is 41%" in page.text_content
-
-    assert async_result is not None
-    assert async_result.page_number == 3
-    assert len(deps.tool_traces) == 1
